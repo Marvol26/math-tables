@@ -148,3 +148,9 @@ evidence: **WP6-1** `README.md` (Hebrew first, English translation below, per pl
   `npm test` → 68/68 pass, exit 0 (docs-only change).
 deviations: none
 assumptions discovered: none
+
+## 2026-08-25T19:06:09Z · plan v1 · WP7-1 + WP7-2 · DONE
+commit: (README URL addition, see next commit)
+evidence: Marat confirmed outward-facing publication explicitly via AskUserQuestion ("Yes, proceed") before any of this ran, per §9 rule 1 / plan header (L1 = confirm first). Pre-check: `git grep -i "pinHash\|childName" -- ':!core.js' ':!index.html' ':!docs'` → every match is either plan/status-log prose referencing the field *names* or synthetic test-fixture data in `tests/*.test.js` (placeholder name "נועה", fake hash strings like "abc"/"salt:digest"/"someone-elses-hash") — no real personal data anywhere in the repo. `gh repo create Marvol26/math-tables --public --source . --push` → created and pushed (`https://github.com/Marvol26/math-tables`, branch `main`). `gh api -X POST repos/Marvol26/math-tables/pages -f build_type=legacy -f 'source[branch]=main' -f 'source[path]=/'` → enabled, `html_url: https://marvol26.github.io/math-tables/`. Polled via a background Monitor until live: `curl -s -o /dev/null -w "%{http_code}" https://marvol26.github.io/math-tables/` → 200, page `<title>` = "לוח הכפל" (Hebrew title visible, matching WP7-1's literal done-when). URL recorded in `README.md` (both Hebrew and English sections).
+deviations: none
+assumptions discovered: none

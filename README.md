@@ -2,6 +2,8 @@
 
 משחק לתרגול לוח הכפל (1×1 עד 10×10) בעברית, לילדה בת 8. תשובות מוקלדות, בלי רמזים, מטבעות על כל שאלה, אוסף מדבקות, פרסים אמיתיים שההורים מגדירים, ומצב אתגר עם שעון (אופציונלי, לעולם לא מעניש). מסך הורים נעול בקוד עם סטטיסטיקות, ניהול פרסים וגיבוי.
 
+🔗 **המשחק חי כאן:** https://marvol26.github.io/math-tables/
+
 ## התקנה על iPad / iPhone
 
 1. פתחו את הכתובת של המשחק ב**Safari** (לא בדפדפן אחר — רק Safari תומך בהוספה למסך הבית באייפד/אייפון).
@@ -41,6 +43,8 @@ python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפ
 # Math Tables (לוח הכפל)
 
 A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, and an optional never-punishing Challenge Mode timer. A PIN-locked parent view has stats, a rewards editor, and backup tools.
+
+🔗 **Live at:** https://marvol26.github.io/math-tables/
 
 ## Install on iPad / iPhone
 
