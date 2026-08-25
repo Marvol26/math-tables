@@ -290,9 +290,147 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Selector — session planning (DESIGN §6)
+  // --------------------------------------------------------------------
+  function fisherYatesShuffle(arr, rng) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  var Selector = {
+    // Reuses the direction of the most recent miss for this fact, if any; else random.
+    chooseDirection: function (fact, key, rng) {
+      var parts = Facts.parts(key);
+      var a = parts[0];
+      var b = parts[1];
+      if (fact && fact.recent && fact.recent.length) {
+        for (var i = fact.recent.length - 1; i >= 0; i--) {
+          if (!fact.recent[i].ok) return fact.recent[i].asked;
+        }
+      }
+      return rng() < 0.5 ? a + "x" + b : b + "x" + a;
+    },
+
+    weaknessScore: function (state, key, now) {
+      var fact = Facts.getFact(state, key);
+      var acc = fact.attempts > 0 ? fact.correct / fact.attempts : 0;
+      var learning = Facts.mastery(fact) === "learning" ? 1 : 0;
+      var daysSinceSeen = fact.lastSeen ? (now - fact.lastSeen) / (1000 * 60 * 60 * 24) : 0;
+      return (1 - acc) * 2 + learning + daysSinceSeen / 7;
+    },
+
+    // Pure: does not mutate `state`. Returns an array of directional strings
+    // (e.g. "7x2"), length up to CONFIG.SESSION_SIZE, no duplicate canonical keys.
+    plan: function (state, rng, now) {
+      var used = new Set();
+      var planned = [];
+
+      function tryAdd(key) {
+        if (used.has(key)) return false;
+        used.add(key);
+        var fact = Facts.getFact(state, key);
+        planned.push(Selector.chooseDirection(fact, key, rng));
+        return true;
+      }
+
+      // 1. Carryover FIFO first — overflow beyond SESSION_SIZE stays queued
+      //    (state.carryover itself is never mutated here; SessionCore.finish
+      //    recomputes the next carryover from misses + unconsumed leftover).
+      var carryover = state.carryover || [];
+      for (var c = 0; c < carryover.length && planned.length < CONFIG.SESSION_SIZE; c++) {
+        tryAdd(carryover[c]);
+      }
+
+      var remaining = CONFIG.SESSION_SIZE - planned.length;
+      if (remaining > 0) {
+        var allKeys = Facts.allKeys();
+
+        // Reserve 1-2 slots for mastered review, if any mastered facts exist.
+        var masteredPool = allKeys.filter(function (k) {
+          return !used.has(k) && Facts.mastery(Facts.getFact(state, k)) === "mastered";
+        });
+        var reserveMastered = 0;
+        if (masteredPool.length > 0 && remaining > 0) {
+          reserveMastered = Math.min(remaining, masteredPool.length, 1 + Math.floor(rng() * 2));
+        }
+        var nonMasteredSlots = remaining - reserveMastered;
+
+        // 2a. Unseen facts, sum ascending, random tie-break within equal sums.
+        if (nonMasteredSlots > 0) {
+          var unseen = allKeys.filter(function (k) {
+            return !used.has(k) && Facts.getFact(state, k).attempts === 0;
+          });
+          var bySum = {};
+          unseen.forEach(function (k) {
+            var p = Facts.parts(k);
+            var sum = p[0] + p[1];
+            (bySum[sum] = bySum[sum] || []).push(k);
+          });
+          var sums = Object.keys(bySum).map(Number).sort(function (x, y) {
+            return x - y;
+          });
+          var unseenOrdered = [];
+          sums.forEach(function (sum) {
+            unseenOrdered.push.apply(unseenOrdered, fisherYatesShuffle(bySum[sum].slice(), rng));
+          });
+          for (var u = 0; u < unseenOrdered.length && nonMasteredSlots > 0; u++) {
+            if (tryAdd(unseenOrdered[u])) nonMasteredSlots--;
+          }
+        }
+
+        // 2b. Weakest ("learning") facts: candidate pool of nonMasteredSlots+6,
+        //     then a random pick from that pool (adds session-to-session variety).
+        if (nonMasteredSlots > 0) {
+          var learningPool = allKeys.filter(function (k) {
+            return !used.has(k) && Facts.mastery(Facts.getFact(state, k)) === "learning";
+          });
+          learningPool.sort(function (x, y) {
+            return Selector.weaknessScore(state, y, now) - Selector.weaknessScore(state, x, now);
+          });
+          var poolSize = Math.min(learningPool.length, nonMasteredSlots + 6);
+          var candidatePool = fisherYatesShuffle(learningPool.slice(0, poolSize), rng);
+          for (var w = 0; w < candidatePool.length && nonMasteredSlots > 0; w++) {
+            if (tryAdd(candidatePool[w])) nonMasteredSlots--;
+          }
+        }
+
+        // 3. Mastered review slots.
+        if (reserveMastered > 0) {
+          var masteredShuffled = fisherYatesShuffle(masteredPool.slice(), rng);
+          var taken = 0;
+          for (var m = 0; m < masteredShuffled.length && taken < reserveMastered; m++) {
+            if (tryAdd(masteredShuffled[m])) taken++;
+          }
+        }
+
+        // 4. Random fill (only reached if the pools above could not fill the session).
+        if (planned.length < CONFIG.SESSION_SIZE) {
+          var leftoverKeys = fisherYatesShuffle(
+            allKeys.filter(function (k) {
+              return !used.has(k);
+            }),
+            rng
+          );
+          for (var f = 0; f < leftoverKeys.length && planned.length < CONFIG.SESSION_SIZE; f++) {
+            tryAdd(leftoverKeys[f]);
+          }
+        }
+      }
+
+      return fisherYatesShuffle(planned, rng);
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
     Economy: Economy,
+    Selector: Selector,
   };
 });
