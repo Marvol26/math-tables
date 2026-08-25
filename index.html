@@ -4,6 +4,15 @@
 <meta charset="utf-8" />
 <title>לוח הכפל</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#4F7CFF" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="לוח הכפל" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Varela+Round&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #FFF8F0;
@@ -138,6 +147,10 @@
 <div id="app">טוענת...</div>
 <div id="stale-card" role="alert"></div>
 <div id="save-failure-banner" class="banner" role="alert"></div>
+<div id="update-toast" class="banner" role="status" style="display:none;top:0;background:var(--primary);color:#fff">
+  <span id="update-toast-text"></span>
+  <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem">רענני</button>
+</div>
 
 <script src="core.js"></script>
 <script>
@@ -310,7 +323,7 @@
   // ------------------------------------------------------------------
   // Boot / storage glue
   // ------------------------------------------------------------------
-  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null };
+  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null, updateAvailable: false };
   window.App = App;
 
   function S() { return App.storage.state; }
@@ -410,9 +423,32 @@
     var name = currentHashScreen();
     var fn = Screens[name] || Screens.home;
     fn();
+    refreshUpdateToast();
   }
 
   window.addEventListener("hashchange", route);
+
+  // Update toast only ever shows on Home (DESIGN §11 "never mid-session") —
+  // re-evaluated on every route() call, not just when the SW message
+  // arrives, so navigating to/away from Home while an update is pending
+  // shows/hides it correctly.
+  function refreshUpdateToast() {
+    var el = document.getElementById("update-toast");
+    var show = App.updateAvailable && currentHashScreen() === "home";
+    el.style.display = show ? "flex" : "none";
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("sw.js").catch(function () { /* best-effort */ });
+    navigator.serviceWorker.addEventListener("message", function (ev) {
+      if (ev.data && ev.data.type === "updated") {
+        App.updateAvailable = true;
+        document.getElementById("update-toast-text").textContent = "יש גרסה חדשה — רענני";
+        refreshUpdateToast();
+      }
+    });
+  }
 
   // ------------------------------------------------------------------
   // Screen: Parent setup (D15) — gates everything else until pinHash is set.
@@ -1460,6 +1496,11 @@
         save(function (s) { MathCore.SessionCore.markInterrupted(s); }); // independent of submit
       }
     });
+
+    document.querySelector('[data-action="reload-for-update"]').addEventListener("click", function () {
+      location.reload();
+    });
+    registerServiceWorker();
 
     if (!state.settings.pinHash) {
       Screens.parentSetup();
