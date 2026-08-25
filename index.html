@@ -40,7 +40,9 @@
   button.ghost { background: transparent; color: var(--muted); border: none; font-size: 0.9rem; }
   button:disabled { opacity: 0.5; cursor: default; }
   .card { background: var(--card-bg); border-radius: var(--card-radius); padding: 1.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-  .screen { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; gap: 1rem; text-align: center; }
+  .screen { position: relative; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; gap: 1rem; text-align: center; overflow-y: auto; }
+  .question-info, .question-input { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+  .dots-text { display: none; }
   .screen.compact { padding: 0.75rem; gap: 0.5rem; }
   .ltr { direction: ltr; unicode-bidi: isolate; }
   .muted { color: var(--muted); font-size: 0.9rem; }
@@ -86,6 +88,23 @@
   @media (max-height: 600px) {
     .screen { padding: 0.5rem; gap: 0.4rem; }
     .equation { font-size: clamp(28px, 8vw, 56px); }
+  }
+  /* Short+wide (iPhone SE/most phones landscape, iPad Split View 1/3): a
+     4-row numpad stacked under the equation cannot fit under ~400px of
+     height at any equation size, so lay the two groups out side-by-side
+     instead and shrink the numpad modestly. Verified against a real
+     ~330px-tall viewport (iPhone SE landscape in Safari) via live browser
+     testing — the stacked layout left the ✓ key below the fold. */
+  @media (max-height: 420px) and (min-width: 480px) {
+    [data-screen="question"] { flex-direction: row; justify-content: center; gap: 2rem; padding: 0.4rem; }
+    [data-screen="question"] .question-info, [data-screen="question"] .question-input { gap: 0.4rem; }
+    [data-screen="question"] .dots { display: none; }
+    [data-screen="question"] .dots-text { display: block; }
+    [data-screen="question"] .equation { font-size: clamp(24px, 6vw, 40px); }
+    [data-screen="question"] .numpad { width: min(260px, 38vw); gap: 0.3rem; }
+    [data-screen="question"] .numpad button { min-height: 44px; min-width: 44px; font-size: 1.1rem; }
+    [data-screen="question"] .coin-pill { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+    [data-screen="question"] .challenge-bar-track { width: min(260px, 38vw); }
   }
   #stale-card {
     display: none;
@@ -210,7 +229,7 @@
   // ------------------------------------------------------------------
   // Boot / storage glue
   // ------------------------------------------------------------------
-  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false };
+  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null };
   window.App = App;
 
   function S() { return App.storage.state; }
@@ -276,8 +295,20 @@
     return m ? m[1] : "home";
   }
 
+  // Routes exactly once per navigation: if the hash actually changes, the
+  // `hashchange` listener below calls route(); if the target hash is already
+  // current (hashchange would not fire), call route() here instead. Never
+  // both — a double route() call raced SessionCore.paint()'s own
+  // already-current-question "resume" detection and wrongly marked the
+  // very first question of a session as interrupted (caught via live
+  // browser testing, not by any unit test).
   function navigate(screen) {
-    location.hash = "#screen=" + screen;
+    var target = "#screen=" + screen;
+    if (location.hash === target) {
+      route();
+    } else {
+      location.hash = target;
+    }
   }
 
   function render(html) {
@@ -358,7 +389,7 @@
     var ack = document.getElementById("recovery-ack");
     var finishBtn = document.getElementById("recovery-finish");
     ack.addEventListener("change", function () { finishBtn.disabled = !ack.checked; });
-    finishBtn.addEventListener("click", function () { navigate("home"); route(); });
+    finishBtn.addEventListener("click", function () { navigate("home"); });
   }
 
   // ------------------------------------------------------------------
@@ -388,20 +419,19 @@
     );
 
     bindAction("play", startOrResumeSession);
-    bindAction("nav-collection", function () { navigate("collection"); route(); });
-    bindAction("nav-rewards", function () { navigate("rewards"); route(); });
-    bindAction("nav-parent", function () { navigate("parent"); route(); });
+    bindAction("nav-collection", function () { navigate("collection"); });
+    bindAction("nav-rewards", function () { navigate("rewards"); });
+    bindAction("nav-parent", function () { navigate("parent"); });
   };
 
   function startOrResumeSession() {
     var state = S();
     if (!state.active) {
       save(function (s) { MathCore.SessionCore.start(s, Math.random, Date.now()); }).then(function (result) {
-        if (result.ok) { navigate("question"); route(); }
+        if (result.ok) { navigate("question"); }
       });
     } else {
       navigate("question");
-      route();
     }
   }
 
@@ -417,14 +447,14 @@
 
   Screens.question = function () {
     var state = S();
-    if (!state.active) { navigate("home"); route(); return; }
+    if (!state.active) { navigate("home"); return; }
     App.feedbackLock = false;
     paintNextQuestion();
   };
 
   function paintNextQuestion() {
     var state = S();
-    if (!state.active) { navigate("home"); route(); return; }
+    if (!state.active) { navigate("home"); return; }
     if (state.active.current) { renderQuestion(); return; }
     requestAnimationFrame(function () {
       var paintedResult = null;
@@ -443,19 +473,36 @@
     questionInput = "";
     var parts = MathCore.Facts.parts(current.asked);
     var coarse = state.settings.forceNumpad !== false && (isCoarsePointer() || state.settings.forceNumpad === true);
-    var totalPlanned = active.planned.length;
-    var doneCount = active.attempts.filter(function (a) { return !a.retry; }).length;
-    var dotsHtml = active.planned.map(function (asked, i) {
-      var cls = i < doneCount ? "dot done" : "dot";
+    // Dots reflect actual per-fact resolution state, not just "how many
+    // attempts have happened so far" — a wrong first attempt must show as
+    // pending-retry (DESIGN §6 "retries show 🔁"), not as done (caught via
+    // live browser testing: a missed question's dot was rendering green).
+    var retrySet = {};
+    active.retryQueue.forEach(function (asked) { retrySet[asked] = true; });
+    var resolvedSet = {};
+    active.attempts.forEach(function (a) { if (a.ok) resolvedSet[a.asked] = true; });
+    var dotsHtml = active.planned.map(function (asked) {
+      var cls = "dot";
+      if (retrySet[asked]) cls = "dot retry";
+      else if (resolvedSet[asked]) cls = "dot done";
       return '<span class="' + cls + '"></span>';
     }).join("");
+    var doneOrRetryCount = active.planned.filter(function (asked) { return resolvedSet[asked] || retrySet[asked]; }).length;
     var value = MathCore.Facts.value(state, current.key);
     var challengeOn = active.settingsSnapshot.challengeOn && !current.interrupted;
 
+    // Two groups (.question-info / .question-input) so a landscape/short-height
+    // layout (iPhone SE landscape, iPad Split View — real device heights as
+    // low as ~330px, confirmed via live browser resize testing) can place
+    // them side-by-side instead of stacked; a 4-row numpad plus equation
+    // simply does not fit a ~330px viewport stacked vertically regardless of
+    // how much the equation font shrinks.
     render(
       '<div class="screen" data-screen="question">' +
-        '<button class="ghost" data-action="exit" style="align-self:flex-start">' + T.question.exitButton + "</button>" +
+        '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem">' + T.question.exitButton + "</button>" +
+        '<div class="question-info">' +
         '<div class="dots">' + dotsHtml + "</div>" +
+        '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
         (current.interrupted ? '<div class="muted">' + T.question.interruptedLabel + "</div>" :
           challengeOn ? '<div class="challenge-bar-track"><div class="challenge-bar-fill" id="challenge-fill" style="width:100%"></div></div>' : "") +
         '<div class="coin-pill">' + T.question.equalsCoin(value) + "</div>" +
@@ -463,8 +510,11 @@
         "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span><span>=</span>" +
         '<input id="answer-input" ' + (coarse ? 'readonly inputmode="none"' : 'inputmode="numeric"') + ' value="" />' +
         "</div>" +
+        "</div>" +
+        '<div class="question-input">' +
         (coarse ? renderNumpad() : "") +
         '<button class="ghost" data-action="toggle-keyboard">' + (coarse ? T.question.showKeyboard : T.question.showNumpad) + "</button>" +
+        "</div>" +
         "</div>"
     );
 
@@ -599,14 +649,14 @@
 
   function finishSession() {
     var state = S();
-    if (!state.active) { navigate("home"); route(); return; }
+    if (!state.active) { navigate("home"); return; }
     if (state.active.queue.length > 0 || state.active.retryQueue.length > 0) return;
     var sessionResult = null;
     save(function (s) { sessionResult = MathCore.SessionCore.finish(s, Date.now()); }).then(function (result) {
       // Summary is rendered only after finish()'s save resolved (DESIGN §6).
       if (result.ok && sessionResult) {
+        App.lastSessionResult = sessionResult;
         navigate("summary");
-        renderSummary(sessionResult);
       }
     });
   }
@@ -628,7 +678,6 @@
     overlay.querySelector('[data-action="exit-yes"]').addEventListener("click", function () {
       document.body.removeChild(overlay); // exit only suspends (D12) — state.active already journaled
       navigate("home");
-      route();
     });
     overlay.querySelector('[data-action="exit-no"]').addEventListener("click", function () {
       document.body.removeChild(overlay);
@@ -638,6 +687,17 @@
   // ------------------------------------------------------------------
   // Screen: Summary (DESIGN §9.3)
   // ------------------------------------------------------------------
+  // Registered on Screens (not derived purely from state like the others)
+  // so #screen=summary is reachable via the router/hashchange like every
+  // other screen (WP3-1 done-when) instead of only via the direct call from
+  // finishSession() — otherwise a hashchange-triggered route() would find no
+  // Screens.summary, fall back to Home, and immediately stomp the summary
+  // right after it rendered.
+  Screens.summary = function () {
+    if (!App.lastSessionResult) { navigate("home"); return; }
+    renderSummary(App.lastSessionResult);
+  };
+
   function renderSummary(session) {
     var stars = session.firstTryCorrect === session.planned.length ? 3 : session.firstTryCorrect >= 8 ? 2 : 1;
     var titleHtml = session.perfect
@@ -665,7 +725,7 @@
         "</div>"
     );
     bindAction("again", startOrResumeSession);
-    bindAction("done", function () { navigate("home"); route(); });
+    bindAction("done", function () { navigate("home"); });
   }
 
   // ------------------------------------------------------------------
@@ -696,7 +756,7 @@
         '<button class="secondary" data-action="back">' + T.collection.backBtn + "</button>" +
         "</div>"
     );
-    bindAction("back", function () { navigate("home"); route(); });
+    bindAction("back", function () { navigate("home"); });
   };
 
   // ------------------------------------------------------------------
@@ -732,7 +792,7 @@
         '<button class="secondary" data-action="back">' + T.rewards.backBtn + "</button>" +
         "</div>"
     );
-    bindAction("back", function () { navigate("home"); route(); });
+    bindAction("back", function () { navigate("home"); });
     document.querySelectorAll("[data-reward]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var rewardId = btn.dataset.reward;
@@ -755,7 +815,7 @@
         '<button class="secondary" data-action="back">' + T.collection.backBtn + "</button>" +
         "</div>"
     );
-    bindAction("back", function () { navigate("home"); route(); });
+    bindAction("back", function () { navigate("home"); });
   };
 
   // ------------------------------------------------------------------
