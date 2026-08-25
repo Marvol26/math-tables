@@ -685,11 +685,133 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Stats — pure, first-attempt-only (DESIGN §7)
+  // --------------------------------------------------------------------
+  function dayStart(t) {
+    var d = new Date(t);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  var Stats = {
+    perFactTable: function (state) {
+      return Facts.allKeys().map(function (key) {
+        var fact = Facts.getFact(state, key);
+        var times = (fact.recent || []).map(function (r) { return r.ms; }).sort(function (a, b) { return a - b; });
+        var median = times.length ? times[Math.floor(times.length / 2)] : null;
+        return {
+          key: key,
+          attempts: fact.attempts,
+          correct: fact.correct,
+          accuracy: fact.attempts ? fact.correct / fact.attempts : null,
+          medianMs: median,
+          lastSeen: fact.lastSeen,
+          mastery: Facts.mastery(fact),
+        };
+      });
+    },
+
+    // Average ms of first, non-interrupted attempts, clamped at CONFIG.SPEED_CLAMP_MS.
+    sessionAvgMs: function (session) {
+      var eligible = (session.attempts || []).filter(function (a) { return !a.retry && !a.interrupted; });
+      if (!eligible.length) return 0;
+      var total = eligible.reduce(function (sum, a) { return sum + Math.min(a.ms, CONFIG.SPEED_CLAMP_MS); }, 0);
+      return total / eligible.length;
+    },
+
+    sessionSummary: function (session) {
+      return {
+        id: session.id,
+        firstTryCorrect: session.firstTryCorrect,
+        avgMs: Stats.sessionAvgMs(session),
+        misses: session.misses.length,
+        retries: (session.attempts || []).filter(function (a) { return a.retry; }).length,
+        coins: session.coinsEarned,
+        challengeOn: session.challengeOn,
+        timeLimitSec: session.timeLimitSec,
+        masteredAfter: session.masteredAfter,
+      };
+    },
+
+    trends: function (state, n) {
+      var sessions = state.sessions.slice(-n);
+      return {
+        accuracy: sessions.map(function (s) {
+          return s.planned.length ? s.firstTryCorrect / s.planned.length : 0;
+        }),
+        avgMs: sessions.map(Stats.sessionAvgMs),
+        masteredCount: sessions.map(function (s) { return s.masteredAfter; }),
+        coins: sessions.map(function (s) { return s.coinsEarned; }),
+      };
+    },
+
+    // 10x10 grid; cell (a,b) and (b,a) share the same canonical-key data (mirrored).
+    heatmap: function (state) {
+      var grid = [];
+      for (var a = CONFIG.FACTS_MIN; a <= CONFIG.FACTS_MAX; a++) {
+        var row = [];
+        for (var b = CONFIG.FACTS_MIN; b <= CONFIG.FACTS_MAX; b++) {
+          var key = Facts.key(a, b);
+          var fact = Facts.getFact(state, key);
+          row.push({
+            key: key,
+            attempts: fact.attempts,
+            accuracy: fact.attempts ? fact.correct / fact.attempts : null,
+            mastery: Facts.mastery(fact),
+          });
+        }
+        grid.push(row);
+      }
+      return grid;
+    },
+
+    weakest: function (state, now, n) {
+      var count = n || 8;
+      var candidates = Facts.allKeys().filter(function (k) {
+        var fact = Facts.getFact(state, k);
+        return fact.attempts > 0 && Facts.mastery(fact) !== "mastered";
+      });
+      candidates.sort(function (x, y) {
+        return Selector.weaknessScore(state, y, now) - Selector.weaknessScore(state, x, now);
+      });
+      return candidates.slice(0, count);
+    },
+
+    totals: function (state, now) {
+      var sums = Economy.sums(state.economy.ledger);
+      var masteredCount = Facts.allKeys().filter(function (k) {
+        return Facts.mastery(Facts.getFact(state, k)) === "mastered";
+      }).length;
+
+      var daySet = new Set(state.sessions.map(function (s) { return dayStart(s.endedAt); }));
+      var oneDay = 24 * 60 * 60 * 1000;
+      var todayStart = dayStart(now);
+      var streak = 0;
+      var cursor = null;
+      if (daySet.has(todayStart)) cursor = todayStart;
+      else if (daySet.has(todayStart - oneDay)) cursor = todayStart - oneDay;
+      while (cursor !== null && daySet.has(cursor)) {
+        streak++;
+        cursor -= oneDay;
+      }
+
+      return {
+        totalSessions: state.sessions.length,
+        lifetimeCoins: sums.lifetimeCoins,
+        balance: sums.balance,
+        masteredCount: masteredCount,
+        dailyStreak: streak,
+      };
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
     Economy: Economy,
     Selector: Selector,
     SessionCore: SessionCore,
+    Stats: Stats,
   };
 });
