@@ -234,12 +234,13 @@ test("[WP1-gate M3] coins paid for the attempt that flips a fact to mastered mat
   assert.equal(keyAttempt.coins, 3); // but it was paid the pre-attempt (tier) value, not the post-attempt mastered value of 1
 });
 
-test("[WP1-gate M3] a mastered fact that demotes on this very attempt (interrupted, so demotion happens on a LATER attempt) still pays the mastered value that was on screen", () => {
+test("[WP1-gate M3] a fact that demotes FROM mastered on this very attempt (slow but correct) pays the pre-attempt mastered value, not the post-attempt tier value", () => {
   const state = freshState();
   const key = "6x7";
-  for (let i = 0; i < 3; i++) {
-    Facts.updateFromAttempt(state, key, { ok: true, ms: 3000, asked: key, t: i, withinLimit: false, interrupted: false, retry: false });
-  }
+  // recent = [4000, 9000, 4000]: last-3 median = 4000ms -> mastered (pre-attempt), value shown = 1
+  [4000, 9000, 4000].forEach((ms, i) => {
+    Facts.updateFromAttempt(state, key, { ok: true, ms: ms, asked: key, t: i, withinLimit: false, interrupted: false, retry: false });
+  });
   assert.equal(Facts.mastery(state.facts[key]), "mastered");
   assert.equal(Facts.value(state, key), 1);
 
@@ -248,11 +249,16 @@ test("[WP1-gate M3] a mastered fact that demotes on this very attempt (interrupt
   let t = 2000;
   while (state.active.queue.length > 0) {
     const current = SessionCore.paint(state, t);
-    t += 100;
-    SessionCore.submit(state, Facts.answer(current.asked), t, {});
+    // this attempt takes 9000ms for `key` (pushes last-3 median to 9000 -> demotes),
+    // and a trivial 100ms for every other planned fact.
+    const delay = current.key === key ? 9000 : 100;
+    const submitAt = t + delay;
+    SessionCore.submit(state, Facts.answer(current.asked), submitAt, {});
+    t = submitAt;
   }
+  assert.equal(Facts.mastery(state.facts[key]), "learning"); // this attempt did demote it
   const keyAttempt = state.active.attempts.find((a) => a.key === key);
-  assert.equal(keyAttempt.coins, 1); // paid the mastered value that was shown, matching Facts.value() before the attempt
+  assert.equal(keyAttempt.coins, 1); // but paid the pre-attempt (mastered) value that was on screen, not the post-attempt tier value of 3
 });
 
 test("[WP1-gate test-gap] carryover overflow survives an intervening finish(): unconsumed items reappear, misses-first, deduped", () => {
