@@ -1,0 +1,173 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { IDBFactory } = require("fake-indexeddb");
+const { CONFIG, Migrate, Storage } = require("../core.js");
+
+function makeLocalStorage() {
+  const data = {};
+  return {
+    getItem: (k) => (Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null),
+    setItem: (k, v) => { data[k] = String(v); },
+    removeItem: (k) => { delete data[k]; },
+  };
+}
+
+function seedState() {
+  const s = Migrate.emptyState();
+  s.settings.childName = "נועה";
+  s.settings.pinHash = "salt:digest";
+  return s;
+}
+
+test("save() increments rev on each successful write", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db1" });
+  await storage.load();
+  storage.state = seedState();
+  await storage.save((s) => { s.settings.sound = false; }, 100);
+  assert.equal(storage.rev, 1);
+  await storage.save((s) => { s.settings.sound = true; }, 200);
+  assert.equal(storage.rev, 2);
+  assert.equal(storage.state.settings.sound, true);
+});
+
+test("two windows on the same DB: the second window's write goes stale after the first commits", async () => {
+  const idb = new IDBFactory();
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: idb, localStorage, dbName: "shared" });
+  await a.load();
+  a.state = seedState();
+  await a.save((s) => { s.settings.sound = false; }, 100); // rev 0 -> 1, seeds the record
+
+  const b = Storage.create({ indexedDB: idb, localStorage, dbName: "shared" });
+  await b.load(); // loads rev 1
+
+  // window A writes again -> rev 1 -> 2
+  const aResult = await a.save((s) => { s.settings.childName = "from A"; }, 200);
+  assert.equal(aResult.ok, true);
+  assert.equal(a.rev, 2);
+
+  // window B still thinks rev is 1 -> its write must abort as stale
+  const bResult = await b.save((s) => { s.settings.childName = "from B"; }, 300);
+  assert.equal(bResult.ok, false);
+  assert.equal(bResult.stale, true);
+  assert.equal(b.stale, true);
+  // B's in-memory state must be untouched by the failed write
+  assert.equal(b.state.settings.childName, "נועה");
+
+  // reloading B picks up the current rev (A's write)
+  await b.load();
+  assert.equal(b.rev, 2);
+  assert.equal(b.state.settings.childName, "from A");
+});
+
+test("10 concurrent queued saves on one window serialize: rev advances by exactly 10, none stale", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db2" });
+  await storage.load();
+  storage.state = seedState();
+
+  const promises = [];
+  for (let i = 0; i < 10; i++) {
+    promises.push(storage.save((s) => { s.economy.ledger.push({ id: "l_" + i, t: i, type: "earn", amount: 1, ref: "x", note: "" }); }, i));
+  }
+  const results = await Promise.all(promises);
+  assert.ok(results.every((r) => r.ok === true));
+  assert.equal(storage.rev, 10);
+  assert.equal(storage.state.economy.ledger.length, 10);
+});
+
+test("mirror is restored into an empty IDB (IDB wiped, localStorage mirror survives)", async () => {
+  const localStorage = makeLocalStorage();
+  const idb1 = new IDBFactory();
+  const a = Storage.create({ indexedDB: idb1, localStorage, dbName: "wipe-test" });
+  await a.load();
+  a.state = seedState();
+  await a.save((s) => { s.settings.childName = "מיררור"; }, 100);
+
+  // simulate IDB being wiped (fresh factory) while localStorage mirror survives
+  const idb2 = new IDBFactory();
+  const b = Storage.create({ indexedDB: idb2, localStorage, dbName: "wipe-test" });
+  const loaded = await b.load();
+  assert.equal(loaded.settings.childName, "מיררור");
+  assert.equal(b.rev, 1);
+
+  // and it was actually restored into the (new, empty) IDB, not just held in memory
+  const c = Storage.create({ indexedDB: idb2, localStorage: makeLocalStorage(), dbName: "wipe-test" });
+  const loadedFromIdbOnly = await c.load();
+  assert.equal(loadedFromIdbOnly.settings.childName, "מיררור");
+});
+
+test("backupThenReplace + undoLastReplace round-trip keeps the device's own pinHash and restores prior data", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db3" });
+  await storage.load();
+  storage.state = seedState();
+  await storage.save((s) => { s.sessions.push({ id: "s1" }); }, 100);
+  const pinHashBefore = storage.state.settings.pinHash;
+
+  const replacement = Migrate.emptyState();
+  replacement.settings.pinHash = "someone-elses-hash"; // must NOT survive (caller's job to strip; here we simulate a raw replace)
+  replacement.sessions = [];
+  const result = await storage.backupThenReplace(replacement, 200);
+  assert.equal(result.ok, true);
+  assert.deepEqual(storage.state.sessions, []);
+
+  const undoResult = await storage.undoLastReplace(300);
+  assert.equal(undoResult.ok, true);
+  assert.deepEqual(storage.state.sessions, [{ id: "s1" }]);
+  assert.equal(storage.state.settings.pinHash, pinHashBefore);
+});
+
+test("importJson keeps the device's own pinHash even though the imported blob has a different one", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db4" });
+  await storage.load();
+  storage.state = seedState();
+  await storage.save(() => {}, 50);
+  const devicePinHash = storage.state.settings.pinHash;
+
+  const foreign = Migrate.emptyState();
+  foreign.settings.pinHash = "foreign-hash";
+  foreign.settings.childName = "ילד אחר";
+  foreign.sessions = [{ id: "s_foreign" }];
+
+  const result = await storage.importJson(JSON.stringify(foreign), 100);
+  assert.equal(result.ok, true);
+  assert.equal(storage.state.settings.pinHash, devicePinHash);
+  assert.equal(storage.state.settings.childName, "ילד אחר");
+  assert.deepEqual(storage.state.sessions, [{ id: "s_foreign" }]);
+});
+
+test("importJson rejects a malformed blob without touching state", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db5" });
+  await storage.load();
+  storage.state = seedState();
+  const before = JSON.stringify(storage.state);
+
+  const result = await storage.importJson(JSON.stringify({ economy: { ledger: [{ id: "l1" }] } }), 100);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.length > 0);
+  assert.equal(JSON.stringify(storage.state), before);
+});
+
+test("a failed save (IDB throwing) leaves in-memory state (incl. active) intact and surfaces an error", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db6" });
+  await storage.load();
+  storage.state = seedState();
+  storage.state.active = { id: "s_active", current: { key: "6x7" } };
+
+  // break the db handle so the next save() throws
+  const realDb = storage.db;
+  storage.db = { transaction: () => { throw new Error("simulated IDB failure"); } };
+
+  const result = await storage.save((s) => { s.settings.sound = false; }, 100);
+  assert.equal(result.ok, false);
+  assert.ok(result.error);
+  assert.equal(storage.state.active.id, "s_active"); // untouched
+  assert.equal(storage.state.settings.sound, true); // mutation not applied
+
+  storage.db = realDb;
+});

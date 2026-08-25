@@ -961,12 +961,341 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Storage — IndexedDB-authoritative, localStorage-mirrored (DESIGN §8).
+  // Injectable indexedDB/localStorage so it is Node-testable under
+  // fake-indexeddb (PA-2) and browser-real in index.html.
+  // --------------------------------------------------------------------
+  var DB_NAME = "mathtrainer";
+  var STORE_NAME = "state";
+  var RECORD_ID = "state";
+  var BACKUP_ID = "backup";
+  var MIRROR_KEY = "mathtrainer.v1.mirror";
+
+  function idbOpen(idbFactory, dbName) {
+    return new Promise(function (resolve, reject) {
+      var req = idbFactory.open(dbName, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error || new Error("idbOpen failed")); };
+    });
+  }
+
+  function idbGet(db, id) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readonly");
+      var req = tx.objectStore(STORE_NAME).get(id);
+      req.onsuccess = function () { resolve(req.result || null); };
+      req.onerror = function () { reject(req.error || new Error("idbGet failed")); };
+    });
+  }
+
+  function idbPut(db, record) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(record);
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        reject(tx.error || new Error("idbPut failed"));
+      };
+    });
+  }
+
+  // Single readwrite transaction: read the 'state' record's rev, compare to
+  // `expectedRev`; on mismatch abort (nothing written, no partial state) and
+  // resolve {ok:false, stale:true}; on match, apply every put in `puts` and
+  // resolve {ok:true} once the transaction commits (DESIGN §8 rev-check gate).
+  function idbCasWrite(db, expectedRev, puts) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readwrite");
+      var store = tx.objectStore(STORE_NAME);
+      var mismatched = false;
+      var getReq = store.get(RECORD_ID);
+      getReq.onsuccess = function () {
+        var existing = getReq.result;
+        var actualRev = existing ? existing.rev : 0;
+        if (actualRev !== expectedRev) {
+          mismatched = true;
+          try { tx.abort(); } catch (e) { /* already aborting */ }
+          return;
+        }
+        puts.forEach(function (p) { store.put(p); });
+      };
+      getReq.onerror = function () {
+        try { tx.abort(); } catch (e) { /* already aborting */ }
+      };
+      tx.oncomplete = function () { resolve({ ok: true }); };
+      tx.onabort = function () { resolve({ ok: false, stale: mismatched }); };
+      tx.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault(); // let onabort settle it
+      };
+    });
+  }
+
+  function StorageInstance(opts) {
+    this.idb = opts.indexedDB;
+    this.localStorage = opts.localStorage;
+    this.dbName = opts.dbName || DB_NAME;
+    this.db = null;
+    this.state = null;
+    this.rev = 0;
+    this.stale = false;
+    this._queue = Promise.resolve();
+  }
+
+  StorageInstance.prototype._enqueue = function (fn) {
+    var result = this._queue.then(fn, fn);
+    this._queue = result.then(function () {}, function () {});
+    return result;
+  };
+
+  StorageInstance.prototype._mirror = function () {
+    try {
+      this.localStorage.setItem(MIRROR_KEY, JSON.stringify({ rev: this.rev, state: this.state }));
+    } catch (e) { /* mirror is best-effort */ }
+  };
+
+  StorageInstance.prototype._readMirror = function () {
+    try {
+      var raw = this.localStorage.getItem(MIRROR_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // IDB first; falls back to the localStorage mirror if IDB is unavailable
+  // or unparseable; restores the mirror into IDB if IDB is empty but the
+  // mirror has data (IDB wiped). Returns null if neither has anything.
+  StorageInstance.prototype.load = function () {
+    var self = this;
+    return idbOpen(self.idb, self.dbName)
+      .then(function (db) {
+        self.db = db;
+        return idbGet(db, RECORD_ID);
+      })
+      .then(function (record) {
+        if (record) {
+          self.rev = record.rev;
+          self.state = record.state;
+          self._mirror();
+          return self.state;
+        }
+        var mirror = self._readMirror();
+        if (mirror) {
+          self.rev = mirror.rev;
+          self.state = mirror.state;
+          return idbPut(self.db, { id: RECORD_ID, rev: self.rev, state: self.state }).then(function () {
+            return self.state;
+          });
+        }
+        self.rev = 0;
+        self.state = null;
+        return null;
+      })
+      .catch(function () {
+        var mirror = self._readMirror();
+        if (mirror) {
+          self.rev = mirror.rev;
+          self.state = mirror.state;
+          return self.state;
+        }
+        self.rev = 0;
+        self.state = null;
+        return null;
+      });
+  };
+
+  // Enqueues onto the per-window promise queue (at most one transaction in
+  // flight). `mutator(clone)` mutates a clone of the current state in place;
+  // the clone only replaces `this.state` on a successful commit — a failed
+  // save (stale or exception) always leaves `this.state` (incl. `active`)
+  // untouched.
+  StorageInstance.prototype.save = function (mutator, now) {
+    var self = this;
+    return self._enqueue(function () {
+      if (!self.state) return Promise.resolve({ ok: false, error: "no state loaded" });
+      var clone = JSON.parse(JSON.stringify(self.state));
+      mutator(clone);
+      clone.rev = self.rev + 1;
+      clone.savedAt = now;
+      var expectedRev = self.rev;
+      return idbCasWrite(self.db, expectedRev, [{ id: RECORD_ID, rev: clone.rev, state: clone }])
+        .then(function (result) {
+          if (!result.ok) {
+            self.stale = true;
+            return { ok: false, stale: true };
+          }
+          self.rev = clone.rev;
+          self.state = clone;
+          self._mirror();
+          return { ok: true, state: self.state };
+        })
+        .catch(function (err) {
+          return { ok: false, error: String((err && err.message) || err) };
+        });
+    });
+  };
+
+  StorageInstance.prototype.flush = function () {
+    return this._queue;
+  };
+
+  // Backs up the current state to a separate 'backup' record, then replaces
+  // the whole 'state' record with `newState` — both in one transaction, so
+  // an interrupted write never leaves a backup without its matching replace
+  // (used by import/reset; undo reads the backup record back).
+  StorageInstance.prototype.backupThenReplace = function (newState, now) {
+    var self = this;
+    return self._enqueue(function () {
+      if (!self.state) return Promise.resolve({ ok: false, error: "no state loaded" });
+      var backupRecord = { id: BACKUP_ID, rev: self.rev, state: self.state, savedAt: now };
+      var nextState = JSON.parse(JSON.stringify(newState));
+      nextState.rev = self.rev + 1;
+      nextState.savedAt = now;
+      var mainRecord = { id: RECORD_ID, rev: nextState.rev, state: nextState };
+      return idbCasWrite(self.db, self.rev, [backupRecord, mainRecord])
+        .then(function (result) {
+          if (!result.ok) {
+            self.stale = true;
+            return { ok: false, stale: true };
+          }
+          self.rev = nextState.rev;
+          self.state = nextState;
+          self._mirror();
+          return { ok: true, state: self.state };
+        })
+        .catch(function (err) {
+          return { ok: false, error: String((err && err.message) || err) };
+        });
+    });
+  };
+
+  StorageInstance.prototype.undoLastReplace = function (now) {
+    var self = this;
+    return self._enqueue(function () {
+      return idbGet(self.db, BACKUP_ID).then(function (backup) {
+        if (!backup) return { ok: false, reason: "no backup available" };
+        var restored = JSON.parse(JSON.stringify(backup.state));
+        restored.rev = self.rev + 1;
+        restored.savedAt = now;
+        var mainRecord = { id: RECORD_ID, rev: restored.rev, state: restored };
+        return idbCasWrite(self.db, self.rev, [mainRecord]).then(function (result) {
+          if (!result.ok) {
+            self.stale = true;
+            return { ok: false, stale: true };
+          }
+          self.rev = restored.rev;
+          self.state = restored;
+          self._mirror();
+          return { ok: true, state: self.state };
+        });
+      });
+    });
+  };
+
+  // Sets lastExportAt (a real save, so other windows see it too) then
+  // returns the serialized JSON.
+  StorageInstance.prototype.exportJson = function (now) {
+    var self = this;
+    return self.save(function (s) { s.lastExportAt = now; }, now).then(function (result) {
+      if (!result.ok) return result;
+      return { ok: true, json: JSON.stringify(self.state) };
+    });
+  };
+
+  // validate -> migrate (stripping any foreign PIN) -> keep this device's own
+  // pinHash/recoveryHash -> preview via Migrate metadata -> backupThenReplace.
+  StorageInstance.prototype.importJson = function (text, now) {
+    var self = this;
+    var raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (e) {
+      return Promise.resolve({ ok: false, problems: ["invalid JSON"] });
+    }
+    var validation = Migrate.validateImport(raw);
+    if (!validation.ok) return Promise.resolve({ ok: false, problems: validation.problems });
+    var imported = Migrate.forImport(raw);
+    imported.settings.pinHash = self.state ? self.state.settings.pinHash : null;
+    imported.settings.recoveryHash = self.state ? self.state.settings.recoveryHash : null;
+    return self.backupThenReplace(imported, now);
+  };
+
+  var Storage = {
+    create: function (opts) {
+      return new StorageInstance(opts);
+    },
+  };
+
+  // --------------------------------------------------------------------
+  // Pin — child-deterrent PIN hashing + recovery code (WebCrypto; injectable
+  // so it is Node-testable via crypto.webcrypto). Not a security boundary
+  // against an adult attacker — stated purpose is a deterrent only.
+  // --------------------------------------------------------------------
+  var Pin = {
+    RECOVERY_ALPHABET: "ABCDEFGHJKMNPQRSTUVWXYZ23456789", // no I/L/O/0/1
+
+    isValidFormat: function (pin) {
+      return /^\d{4}$/.test(pin);
+    },
+
+    randomHex: function (cryptoObj, byteLength) {
+      var arr = new Uint8Array(byteLength);
+      cryptoObj.getRandomValues(arr);
+      return Array.from(arr).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    },
+
+    sha256Hex: function (cryptoObj, text) {
+      var enc = new TextEncoder().encode(text);
+      return cryptoObj.subtle.digest("SHA-256", enc).then(function (buf) {
+        return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      });
+    },
+
+    // Returns "salt:digest" — the single string DESIGN §8 stores as settings.pinHash.
+    hash: function (cryptoObj, pin) {
+      var salt = Pin.randomHex(cryptoObj, 16);
+      return Pin.sha256Hex(cryptoObj, pin + ":" + salt).then(function (digest) {
+        return salt + ":" + digest;
+      });
+    },
+
+    verify: function (cryptoObj, pin, stored) {
+      if (!stored) return Promise.resolve(false);
+      var parts = stored.split(":");
+      var salt = parts[0];
+      var digest = parts[1];
+      return Pin.sha256Hex(cryptoObj, pin + ":" + salt).then(function (d) { return d === digest; });
+    },
+
+    generateRecoveryCode: function (cryptoObj, length) {
+      var len = length || 6;
+      var arr = new Uint8Array(len);
+      cryptoObj.getRandomValues(arr);
+      var out = "";
+      for (var i = 0; i < len; i++) {
+        out += Pin.RECOVERY_ALPHABET[arr[i] % Pin.RECOVERY_ALPHABET.length];
+      }
+      return out;
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
     Economy: Economy,
     Selector: Selector,
     SessionCore: SessionCore,
+    Storage: Storage,
+    Pin: Pin,
     Stats: Stats,
     Migrate: Migrate,
   };
