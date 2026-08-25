@@ -124,3 +124,17 @@ test("unlockThreshold and newUnlocks follow the 25n + 5n(n-1)/2 curve", () => {
   const unlocks = Economy.newUnlocks(state);
   assert.deepEqual(unlocks, [CONFIG.STICKERS[0], CONFIG.STICKERS[1]]);
 });
+
+test("[WP1-gate minor] approveRequest never marks a request approved if the ledger entry id collides (no free reward)", () => {
+  const state = emptyState();
+  state.economy.rewards.push({ id: "r1", name: "גלידה", cost: 10, active: true });
+  Economy.ledgerAppend(state, { id: "l_earn1", t: 1, type: "earn", amount: 50, ref: "s1", note: "session" });
+  // pre-seed a ledger entry with the id approveRequest will try to use
+  Economy.ledgerAppend(state, { id: "l_collide", t: 2, type: "earn", amount: 0, ref: "x", note: "" });
+  Economy.requestReward(state, "r1", "q1", 3);
+
+  const result = Economy.approveRequest(state, "q1", "l_collide", 4);
+  assert.equal(result.ok, false);
+  assert.equal(state.economy.requests[0].status, "requested"); // not silently approved
+  assert.equal(state.economy.ledger.filter((e) => e.type === "redeem").length, 0);
+});

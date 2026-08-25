@@ -261,8 +261,7 @@
       if (balance < request.costSnapshot) {
         return { ok: false, reason: "insufficient balance" };
       }
-      request.status = "approved";
-      Economy.ledgerAppend(state, {
+      var appended = Economy.ledgerAppend(state, {
         id: ledgerEntryId,
         t: t,
         type: "redeem",
@@ -270,6 +269,8 @@
         ref: request.id,
         note: request.nameSnapshot,
       });
+      if (!appended.ok) return { ok: false, reason: "ledger entry id collision" };
+      request.status = "approved";
       return { ok: true };
     },
 
@@ -439,6 +440,11 @@
   var SessionCore = {
     // Creates state.active from a fresh plan. Mutates `state`, returns state.active.
     start: function (state, rng, now) {
+      if (state.active) {
+        var err = new Error("cannot start: a session is already active (state.active is set)");
+        err.code = "ACTIVE_SESSION_EXISTS";
+        throw err;
+      }
       var planned = Selector.plan(state, rng, now);
       var active = {
         id: "s_" + now + "_" + Math.floor(rng() * 1e6),
@@ -515,6 +521,14 @@
       };
 
       if (!current.retry) {
+        // Coins must be computed from the fact's PRE-attempt state — the value
+        // that was on screen when the question was painted — before this
+        // attempt's own outcome can flip its mastery (WP1-gate M3).
+        attemptRecord.coins = Economy.coinsFor(state, current.key, {
+          ok: ok,
+          retry: false,
+          withinLimit: withinLimit,
+        });
         Facts.updateFromAttempt(state, current.key, {
           ok: ok,
           ms: ms,
@@ -523,11 +537,6 @@
           withinLimit: withinLimit,
           interrupted: !!current.interrupted,
           retry: false,
-        });
-        attemptRecord.coins = Economy.coinsFor(state, current.key, {
-          ok: ok,
-          retry: false,
-          withinLimit: withinLimit,
         });
       }
 
@@ -596,7 +605,10 @@
             streakCount++;
             var amount = CONFIG.STREAK_BONUS;
             Economy.ledgerAppend(state, {
-              id: "l_" + sid + "_streak_" + streakRun,
+              // Cumulative bonus count, not the run position — two separate
+              // 5-runs in one session would otherwise collide on the same id
+              // and the duplicate-id guard would silently eat the second bonus.
+              id: "l_" + sid + "_streak_" + streakCount,
               t: now,
               type: "earn",
               amount: amount,
@@ -695,11 +707,22 @@
   }
 
   var Stats = {
+    // Median ms of the last MASTERY_WINDOW correct, non-interrupted first
+    // attempts (DESIGN §7) — the same eligible set Facts.mastery() uses, so a
+    // miss or an interrupted resume (which can carry an arbitrarily large ms
+    // across a relaunch) never poisons the displayed speed (WP1-gate M2).
+    factMedianMs: function (fact) {
+      var eligible = (fact.recent || []).filter(function (r) { return r.ok && !r.interrupted; });
+      var last = eligible.slice(-CONFIG.MASTERY_WINDOW);
+      if (!last.length) return null;
+      var times = last.map(function (r) { return r.ms; }).sort(function (a, b) { return a - b; });
+      return times[Math.floor(times.length / 2)];
+    },
+
     perFactTable: function (state) {
       return Facts.allKeys().map(function (key) {
         var fact = Facts.getFact(state, key);
-        var times = (fact.recent || []).map(function (r) { return r.ms; }).sort(function (a, b) { return a - b; });
-        var median = times.length ? times[Math.floor(times.length / 2)] : null;
+        var median = Stats.factMedianMs(fact);
         return {
           key: key,
           attempts: fact.attempts,

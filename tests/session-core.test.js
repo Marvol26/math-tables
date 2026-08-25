@@ -190,3 +190,110 @@ test("suspend/resume keeps the same plan and the same current question position"
   assert.equal(reloaded.active.current.asked, painted.asked);
   assert.equal(reloaded.active.queue.length, state.active.queue.length);
 });
+
+// --- WP1-gate regression tests (fixes for M1/M3 found by the strong-model review) ---
+
+test("[WP1-gate M1] start() refuses to clobber an in-flight session; the original session, its attempts and journal survive the throw", () => {
+  const state = freshState();
+  SessionCore.start(state, seededRng(9), 1000);
+  const originalId = state.active.id;
+  const originalPlanned = state.active.planned.slice();
+  const current = SessionCore.paint(state, 1000);
+  SessionCore.submit(state, Facts.answer(current.asked), 1100, {});
+  const attemptsBefore = JSON.stringify(state.active.attempts);
+
+  assert.throws(() => SessionCore.start(state, seededRng(10), 5000), (err) => err.code === "ACTIVE_SESSION_EXISTS");
+
+  assert.equal(state.active.id, originalId);
+  assert.deepEqual(state.active.planned, originalPlanned);
+  assert.equal(JSON.stringify(state.active.attempts), attemptsBefore);
+  assert.equal(state.sessions.length, 0);
+  assert.equal(state.economy.ledger.length, 0);
+});
+
+test("[WP1-gate M3] coins paid for the attempt that flips a fact to mastered match the value shown before that attempt (tier value, not mastered-1)", () => {
+  const state = freshState();
+  const key = "6x7";
+  // two prior fast-correct attempts: fact is "learning", displayed value = tier 3 (6x7 is tier 3)
+  Facts.updateFromAttempt(state, key, { ok: true, ms: 3000, asked: key, t: 1, withinLimit: false, interrupted: false, retry: false });
+  Facts.updateFromAttempt(state, key, { ok: true, ms: 3000, asked: key, t: 2, withinLimit: false, interrupted: false, retry: false });
+  assert.equal(Facts.mastery(state.facts[key]), "learning");
+  assert.equal(Facts.value(state, key), 3);
+
+  state.carryover = [key]; // force this fact into the plan
+  SessionCore.start(state, seededRng(11), 2000);
+  let t = 2000;
+  // drive the plan, answering `key` correctly (this is the 3rd fast-correct attempt -> flips to mastered)
+  while (state.active.queue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    t += 100;
+    SessionCore.submit(state, Facts.answer(current.asked), t, {});
+  }
+  const keyAttempt = state.active.attempts.find((a) => a.key === key);
+  assert.equal(Facts.mastery(state.facts[key]), "mastered"); // this attempt did flip it
+  assert.equal(keyAttempt.coins, 3); // but it was paid the pre-attempt (tier) value, not the post-attempt mastered value of 1
+});
+
+test("[WP1-gate M3] a mastered fact that demotes on this very attempt (interrupted, so demotion happens on a LATER attempt) still pays the mastered value that was on screen", () => {
+  const state = freshState();
+  const key = "6x7";
+  for (let i = 0; i < 3; i++) {
+    Facts.updateFromAttempt(state, key, { ok: true, ms: 3000, asked: key, t: i, withinLimit: false, interrupted: false, retry: false });
+  }
+  assert.equal(Facts.mastery(state.facts[key]), "mastered");
+  assert.equal(Facts.value(state, key), 1);
+
+  state.carryover = [key];
+  SessionCore.start(state, seededRng(12), 2000);
+  let t = 2000;
+  while (state.active.queue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    t += 100;
+    SessionCore.submit(state, Facts.answer(current.asked), t, {});
+  }
+  const keyAttempt = state.active.attempts.find((a) => a.key === key);
+  assert.equal(keyAttempt.coins, 1); // paid the mastered value that was shown, matching Facts.value() before the attempt
+});
+
+test("[WP1-gate test-gap] carryover overflow survives an intervening finish(): unconsumed items reappear, misses-first, deduped", () => {
+  const state = freshState();
+  state.carryover = [
+    "1x1", "1x2", "1x3", "1x4", "1x5", "1x6", "1x7", "1x8", "1x9", "1x10",
+    "2x2", "2x3", "2x4",
+  ];
+  SessionCore.start(state, seededRng(13), 1000);
+  const planned = state.active.planned.slice();
+  let t = 1000;
+  const missedAsked = planned[0]; // miss the first planned question, answer the rest correctly
+  const [ma, mb] = missedAsked.split("x").map(Number);
+  const missedKey = Facts.key(ma, mb);
+  while (state.active.queue.length > 0 || state.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    t += 100;
+    if (current.asked === missedAsked && !current.retry) {
+      SessionCore.submit(state, -1, t, {});
+    } else {
+      SessionCore.submit(state, Facts.answer(current.asked), t, {});
+    }
+  }
+  const session = SessionCore.finish(state, t + 1);
+
+  assert.deepEqual(session.misses, [missedKey]);
+  // next carryover = today's miss first, then the 3 unconsumed overflow items, in order
+  assert.deepEqual(state.carryover, [missedKey, "2x2", "2x3", "2x4"]);
+});
+
+test("[WP1-gate test-gap] the perfect bonus is awarded only once per calendar day across two real perfect sessions driven through finish()", () => {
+  const state = freshState();
+  const morning = new Date(2026, 7, 25, 9, 0, 0).getTime();
+  const laterSameDay = new Date(2026, 7, 25, 20, 0, 0).getTime();
+
+  const s1 = playPerfectSession(state, seededRng(14), morning);
+  assert.equal(s1.perfect, true);
+
+  const s2 = playPerfectSession(state, seededRng(15), laterSameDay);
+  assert.equal(s2.perfect, true);
+
+  const perfectEntries = state.economy.ledger.filter((e) => e.id.endsWith("_perfect"));
+  assert.equal(perfectEntries.length, 1);
+});

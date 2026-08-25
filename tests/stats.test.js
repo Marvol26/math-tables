@@ -109,3 +109,24 @@ test("totals(): lifetime coins, mastered count, and daily streak", () => {
   const totalsTwoDays = Stats.totals(state, today);
   assert.equal(totalsTwoDays.dailyStreak, 2);
 });
+
+test("[WP1-gate M2] factMedianMs/perFactTable use only the last 3 correct, non-interrupted first attempts (DESIGN §7) — a miss or an interrupted resume never poisons the displayed speed", () => {
+  const fact = {
+    attempts: 5,
+    correct: 4,
+    lastSeen: 5,
+    recent: [
+      { ok: true, ms: 4000, asked: "6x7", t: 1, withinLimit: true, interrupted: false },
+      { ok: false, ms: 2000, asked: "6x7", t: 2, withinLimit: false, interrupted: false }, // a miss must not enter the median window
+      { ok: true, ms: 999999, asked: "6x7", t: 3, withinLimit: false, interrupted: true }, // interrupted: excluded even though ok=true
+      { ok: true, ms: 4000, asked: "6x7", t: 4, withinLimit: true, interrupted: false },
+      { ok: true, ms: 4000, asked: "6x7", t: 5, withinLimit: true, interrupted: false },
+    ],
+  };
+  // eligible (ok && !interrupted), last 3: [4000 (t1), 4000 (t4), 4000 (t5)] -> median 4000
+  assert.equal(Stats.factMedianMs(fact), 4000);
+
+  const state = { facts: { "6x7": fact } };
+  const row = Stats.perFactTable(state).find((r) => r.key === "6x7");
+  assert.equal(row.medianMs, 4000);
+});
