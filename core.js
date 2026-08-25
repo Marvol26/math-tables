@@ -806,6 +806,138 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Migrate — pure raw -> state normalization + import validation (DESIGN §8)
+  // --------------------------------------------------------------------
+  var Migrate = {
+    emptyState: function () {
+      return {
+        schemaVersion: CONFIG.SCHEMA_VERSION,
+        rev: 0,
+        savedAt: 0,
+        createdAt: 0,
+        lastExportAt: null,
+        settings: {
+          childName: "",
+          challengeOn: false,
+          timeLimitSec: CONFIG.DEFAULT_TIME_LIMIT_SEC,
+          sound: true,
+          pinHash: null,
+          recoveryHash: null,
+        },
+        economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
+        facts: {},
+        sessions: [],
+        carryover: [],
+        active: null,
+      };
+    },
+
+    // Pure: raw -> normalized state. Rejects a newer schema with a coded error.
+    // Idempotent: migrate(migrate(raw)) === migrate(raw).
+    migrate: function (raw) {
+      if (!raw || typeof raw !== "object") return Migrate.emptyState();
+      if (typeof raw.schemaVersion === "number" && raw.schemaVersion > CONFIG.SCHEMA_VERSION) {
+        var err = new Error("schemaVersion " + raw.schemaVersion + " is newer than supported " + CONFIG.SCHEMA_VERSION);
+        err.code = "SCHEMA_TOO_NEW";
+        throw err;
+      }
+      var rs = raw.settings || {};
+      var re = raw.economy || {};
+      var state = {
+        schemaVersion: CONFIG.SCHEMA_VERSION,
+        rev: raw.rev || 0,
+        savedAt: raw.savedAt || 0,
+        createdAt: raw.createdAt || 0,
+        lastExportAt: raw.lastExportAt || null,
+        settings: {
+          childName: rs.childName || "",
+          challengeOn: !!rs.challengeOn,
+          timeLimitSec: rs.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+          sound: typeof rs.sound === "boolean" ? rs.sound : true,
+          pinHash: rs.pinHash || null,
+          recoveryHash: rs.recoveryHash || null,
+        },
+        economy: {
+          ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],
+          unlocked: Array.isArray(re.unlocked) ? re.unlocked.slice() : [],
+          rewards: Array.isArray(re.rewards) ? JSON.parse(JSON.stringify(re.rewards)) : [],
+          requests: Array.isArray(re.requests) ? JSON.parse(JSON.stringify(re.requests)) : [],
+        },
+        facts: raw.facts ? JSON.parse(JSON.stringify(raw.facts)) : {},
+        sessions: Array.isArray(raw.sessions) ? JSON.parse(JSON.stringify(raw.sessions)) : [],
+        carryover: Array.isArray(raw.carryover) ? raw.carryover.slice() : [],
+        active: raw.active ? JSON.parse(JSON.stringify(raw.active)) : null,
+      };
+      // Any resumed session (fresh boot or import onto another device) counts
+      // as a lifecycle interruption (DESIGN §6/§7, R2 #5, R3 #2).
+      if (state.active && state.active.current) {
+        state.active.current.interrupted = true;
+      }
+      return state;
+    },
+
+    // migrate() + strip device-local auth so the destination device's own
+    // pinHash/recoveryHash are never overwritten by an import (D15).
+    // Caller (Storage.importJson, WP2) must re-apply the device's own values.
+    forImport: function (raw) {
+      var state = Migrate.migrate(raw);
+      state.settings.pinHash = null;
+      state.settings.recoveryHash = null;
+      return state;
+    },
+
+    validateImport: function (raw) {
+      var problems = [];
+      if (!raw || typeof raw !== "object") {
+        return { ok: false, problems: ["not an object"] };
+      }
+      if (raw.schemaVersion !== undefined && typeof raw.schemaVersion !== "number") {
+        problems.push("schemaVersion must be a number");
+      }
+      if (typeof raw.schemaVersion === "number" && raw.schemaVersion > CONFIG.SCHEMA_VERSION) {
+        problems.push("schemaVersion " + raw.schemaVersion + " is newer than supported " + CONFIG.SCHEMA_VERSION);
+      }
+      if (raw.economy && raw.economy.ledger !== undefined) {
+        if (!Array.isArray(raw.economy.ledger)) {
+          problems.push("economy.ledger must be an array");
+        } else {
+          raw.economy.ledger.forEach(function (entry, i) {
+            if (!entry || typeof entry !== "object") {
+              problems.push("ledger[" + i + "] is not an object");
+              return;
+            }
+            if (typeof entry.id !== "string" || !entry.id) problems.push("ledger[" + i + "].id must be a non-empty string");
+            if (typeof entry.t !== "number") problems.push("ledger[" + i + "].t must be a number");
+            if (["earn", "redeem", "adjust"].indexOf(entry.type) === -1) problems.push("ledger[" + i + "].type must be earn/redeem/adjust");
+            if (typeof entry.amount !== "number") problems.push("ledger[" + i + "].amount must be a number");
+          });
+        }
+      }
+      if (raw.facts !== undefined && (typeof raw.facts !== "object" || raw.facts === null || Array.isArray(raw.facts))) {
+        problems.push("facts must be an object");
+      }
+      if (raw.sessions !== undefined && !Array.isArray(raw.sessions)) {
+        problems.push("sessions must be an array");
+      }
+      if (raw.settings !== undefined && (typeof raw.settings !== "object" || raw.settings === null)) {
+        problems.push("settings must be an object");
+      }
+      return { ok: problems.length === 0, problems: problems };
+    },
+
+    // Self-heals derived fields that can drift on an older/foreign export
+    // (currently: sticker unlocks implied by the ledger but missing from
+    // economy.unlocked). Mutates and returns `state`.
+    recompute: function (state) {
+      var newly = Economy.newUnlocks(state);
+      if (newly.length) {
+        state.economy.unlocked = state.economy.unlocked.concat(newly);
+      }
+      return state;
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
@@ -813,5 +945,6 @@
     Selector: Selector,
     SessionCore: SessionCore,
     Stats: Stats,
+    Migrate: Migrate,
   };
 });
