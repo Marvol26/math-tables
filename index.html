@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>לוח הכפל</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<style>
+  :root {
+    --bg: #FFF8F0;
+    --text: #2B2D42;
+    --wrong: #FF9F68;
+  }
+  html, body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Varela Round", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #app { padding: 2rem; text-align: center; }
+  #stale-card {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #FFFFFF;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    text-align: center;
+    padding: 2rem;
+    z-index: 1000;
+  }
+  #save-failure-banner {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--wrong);
+    color: var(--text);
+    padding: 0.75rem;
+    text-align: center;
+    z-index: 900;
+  }
+</style>
+</head>
+<body>
+<div id="app">טוענת...</div>
+<div id="stale-card" role="alert">המשחק נפתח בחלון אחר — רענני 🔄</div>
+<div id="save-failure-banner" role="alert"></div>
+
+<script src="core.js"></script>
+<script>
+(function () {
+  "use strict";
+  var MathCore = window.MathCore;
+
+  var App = { storage: null, channel: null };
+  window.App = App;
+
+  function showStale() {
+    document.getElementById("stale-card").style.display = "flex";
+  }
+
+  function showSaveFailureBanner(message) {
+    var el = document.getElementById("save-failure-banner");
+    el.textContent = message || "השמירה נכשלה — ננסה שוב";
+    el.style.display = "block";
+  }
+
+  function hideSaveFailureBanner() {
+    document.getElementById("save-failure-banner").style.display = "none";
+  }
+
+  function route() {
+    // WP3/WP4 replace this with the real screen router.
+    document.getElementById("app").textContent = "מוכנה — rev " + App.storage.rev;
+  }
+
+  // Wraps the Storage instance's own save() (in place, so a raw
+  // App.storage.save(...) call from DevTools also drives the UI reactions)
+  // to show the stale card / save-failure banner and courtesy-notify other
+  // same-origin windows over BroadcastChannel.
+  function wireStorageReactions() {
+    var originalSave = App.storage.save.bind(App.storage);
+    App.storage.save = function (mutator, now) {
+      return originalSave(mutator, now == null ? Date.now() : now).then(function (result) {
+        if (result.ok) {
+          hideSaveFailureBanner();
+          if (App.channel) App.channel.postMessage({ type: "saved", rev: App.storage.rev });
+        } else if (result.stale) {
+          showStale();
+        } else {
+          showSaveFailureBanner();
+        }
+        return result;
+      });
+    };
+  }
+
+  async function boot() {
+    App.storage = MathCore.Storage.create({
+      indexedDB: window.indexedDB,
+      localStorage: window.localStorage,
+      dbName: "mathtrainer",
+    });
+
+    var raw = await App.storage.load();
+    var state;
+    try {
+      state = MathCore.Migrate.migrate(raw);
+    } catch (err) {
+      if (err && err.code === "SCHEMA_TOO_NEW") {
+        document.getElementById("app").textContent = "הגרסה הזו ישנה מדי — צריך לעדכן את האפליקציה";
+        return;
+      }
+      throw err;
+    }
+    MathCore.Migrate.recompute(state);
+    App.storage.state = state;
+
+    wireStorageReactions();
+
+    if (navigator.storage && navigator.storage.persist) {
+      try { await navigator.storage.persist(); } catch (e) { /* best-effort, DESIGN §11 */ }
+    }
+
+    // Courtesy-only: the real single-writer defense is Storage's
+    // transactional rev check (DESIGN §8, R2 #3), not this message.
+    if (typeof BroadcastChannel !== "undefined") {
+      App.channel = new BroadcastChannel("mathtrainer");
+      App.channel.onmessage = function (ev) {
+        if (ev.data && ev.data.type === "saved" && ev.data.rev > App.storage.rev) {
+          showStale();
+        }
+      };
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden && App.storage.state && App.storage.state.active) {
+        MathCore.SessionCore.markInterrupted(App.storage.state);
+      }
+    });
+
+    route();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
