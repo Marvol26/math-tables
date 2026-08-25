@@ -224,12 +224,93 @@
       pendingLabel: "מחכה לאישור ⏳",
       noRewards: "עוד אין פרסים — בקשו מההורים להוסיף",
     },
+
+    parent: {
+      title: "הורים",
+      pinPrompt: "קוד הורים",
+      pinPlaceholder: "הקלידו קוד",
+      unlockBtn: "כניסה",
+      wrongPin: "קוד שגוי",
+      forgotPin: "שכחתי קוד",
+      recoveryPrompt: "הקלידו את קוד השחזור",
+      recoverySubmit: "אשרו",
+      wrongRecovery: "קוד שחזור שגוי",
+      newPinPrompt: "בחרו קוד חדש בן 4 ספרות",
+      newPinConfirmPrompt: "הקלידו שוב את הקוד החדש",
+      setNewPinBtn: "שמרו קוד חדש",
+      backToPin: "חזרה",
+
+      settingsTitle: "הגדרות",
+      nameLabel: "שם הילדה",
+      challengeLabel: "מצב אתגר",
+      timeLimitLabel: "זמן לשאלה (שניות)",
+      soundLabel: "צלילים",
+      changePinBtn: "שינוי קוד",
+      saveSettingsBtn: "שמירה",
+      settingsSaved: "נשמר ✓",
+
+      storageStatusTitle: "מצב אחסון",
+      persistedYes: "persisted: כן",
+      persistedNo: "persisted: לא",
+      persistedUnknown: "persisted: לא זמין",
+      standaloneYes: "standalone: כן",
+      standaloneNo: "standalone: לא",
+
+      rewardsTitle: "ניהול פרסים",
+      addRewardBtn: "הוספת פרס",
+      rewardNamePlaceholder: "שם הפרס",
+      rewardCostPlaceholder: "מחיר במטבעות",
+      deactivateBtn: "הסרה",
+      pendingRequestsTitle: "בקשות ממתינות",
+      approveBtn: "אישור",
+      rejectBtn: "דחייה",
+      noPendingRequests: "אין בקשות ממתינות",
+      insufficientBalanceMsg: "אין מספיק מטבעות לאישור הבקשה",
+
+      statsTitle: "התקדמות",
+      kpiSessions: "סבבים",
+      kpiCoins: "מטבעות (סה\"כ)",
+      kpiMastered: "נלמדו לגמרי",
+      kpiStreak: "רצף ימים",
+      kpiAccuracy: "דיוק כללי",
+      trendAccuracy: "דיוק (30 סבבים אחרונים)",
+      trendSpeed: "זמן ממוצע (מ\"ש)",
+      trendMastered: "נלמדו לגמרי",
+      trendCoins: "מטבעות לסבב",
+      heatmapTitle: "מפת חום — כל העובדות",
+      weakestTitle: "8 העובדות הכי קשות",
+      historyTitle: "היסטוריית סבבים",
+      historyOpen: "פתוח",
+
+      dataTitle: "גיבוי ושחזור",
+      exportBtn: "ייצוא גיבוי",
+      importBtn: "ייבוא מקובץ",
+      importPreviewTitle: "תצוגה מקדימה",
+      importWarningActive: "הסבב הפתוח יימחק",
+      importConfirmBtn: "אישור ייבוא",
+      importCancelBtn: "ביטול",
+      importPinPrompt: "הקלידו קוד לאישור",
+      undoBtn: "ביטול הפעולה האחרונה",
+      undoneMsg: "בוטל בהצלחה",
+      resetBtn: "איפוס כל הנתונים",
+      resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד",
+      resetTypeConfirm: "מחק",
+      resetTypeLabel: "הקלידו \"מחק\"",
+      resetTypeMismatch: "צריך להקליד בדיוק \"מחק\"",
+      resetPinLabel: "קוד",
+      resetConfirmBtn: "איפוס סופי",
+      resetCancelBtn: "ביטול",
+      lastExportLabel: function (dateStr) { return "גיבוי אחרון: " + dateStr; },
+      neverExported: "לא גובה מעולם",
+    },
   };
+
+  var APP_VERSION = "0.1.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
   // ------------------------------------------------------------------
-  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null };
+  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null };
   window.App = App;
 
   function S() { return App.storage.state; }
@@ -303,6 +384,10 @@
   // very first question of a session as interrupted (caught via live
   // browser testing, not by any unit test).
   function navigate(screen) {
+    // Leaving the parent area re-locks it (PIN required again next time).
+    if (currentHashScreen() === "parent" && screen !== "parent") {
+      App.parentUnlocked = false;
+    }
     var target = "#screen=" + screen;
     if (location.hash === target) {
       route();
@@ -807,16 +892,526 @@
   // ------------------------------------------------------------------
   // Screen: Parent (PIN-gated) — placeholder; fleshed out in WP4.
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // Screen: Parent (PIN-gated) — DESIGN §9.6
+  // ------------------------------------------------------------------
   Screens.parent = function () {
+    if (!App.parentUnlocked) {
+      renderParentPinEntry();
+    } else {
+      renderParentDashboard();
+    }
+  };
+
+  function renderParentPinEntry() {
     render(
-      '<div class="screen" data-screen="parent" style="background:var(--parent-bg)">' +
-        "<h1>הורים</h1>" +
-        "<p class=\"muted\">מסך ההורים המלא מגיע בשלב הבא</p>" +
-        '<button class="secondary" data-action="back">' + T.collection.backBtn + "</button>" +
-        "</div>"
+      '<div class="screen" data-screen="parent-pin" style="background:var(--parent-bg)">' +
+        '<div class="card" style="width:min(360px,92vw)">' +
+        "<h1>" + T.parent.pinPrompt + "</h1>" +
+        '<div class="muted" id="parent-pin-error" style="min-height:1.2em"></div>' +
+        '<input id="parent-pin-input" type="password" inputmode="numeric" maxlength="4" placeholder="' + T.parent.pinPlaceholder + '" /><br><br>' +
+        '<button data-action="parent-unlock">' + T.parent.unlockBtn + "</button><br><br>" +
+        '<button class="ghost" data-action="parent-forgot">' + T.parent.forgotPin + "</button> " +
+        '<button class="ghost" data-action="back">' + T.collection.backBtn + "</button>" +
+        "</div></div>"
     );
     bindAction("back", function () { navigate("home"); });
-  };
+    bindAction("parent-forgot", function () { renderParentForgotPin(); });
+    var submit = function () {
+      var pin = document.getElementById("parent-pin-input").value;
+      MathCore.Pin.verify(window.crypto, pin, S().settings.pinHash).then(function (ok) {
+        if (ok) {
+          App.parentUnlocked = true;
+          renderParentDashboard();
+        } else {
+          document.getElementById("parent-pin-error").textContent = T.parent.wrongPin;
+        }
+      });
+    };
+    bindAction("parent-unlock", submit);
+    document.getElementById("parent-pin-input").addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") submit();
+    });
+  }
+
+  function renderParentForgotPin() {
+    render(
+      '<div class="screen" data-screen="parent-forgot" style="background:var(--parent-bg)">' +
+        '<div class="card" style="width:min(360px,92vw)">' +
+        "<h1>" + T.parent.forgotPin + "</h1>" +
+        '<div class="muted" id="forgot-error" style="min-height:1.2em"></div>' +
+        "<p>" + T.parent.recoveryPrompt + "</p>" +
+        '<input id="recovery-input" type="text" class="ltr" style="text-align:center;letter-spacing:0.15em" maxlength="6" /><br><br>' +
+        '<button data-action="recovery-submit">' + T.parent.recoverySubmit + "</button> " +
+        '<button class="ghost" data-action="parent-back-to-pin">' + T.parent.backToPin + "</button>" +
+        "</div></div>"
+    );
+    bindAction("parent-back-to-pin", function () { renderParentPinEntry(); });
+    bindAction("recovery-submit", function () {
+      var code = document.getElementById("recovery-input").value.trim().toUpperCase();
+      MathCore.Pin.verify(window.crypto, code, S().settings.recoveryHash).then(function (ok) {
+        if (ok) {
+          renderParentNewPin();
+        } else {
+          document.getElementById("forgot-error").textContent = T.parent.wrongRecovery;
+        }
+      });
+    });
+  }
+
+  function renderParentNewPin() {
+    render(
+      '<div class="screen" data-screen="parent-new-pin" style="background:var(--parent-bg)">' +
+        '<div class="card" style="width:min(360px,92vw)">' +
+        "<h1>" + T.parent.newPinPrompt + "</h1>" +
+        '<div class="muted" id="new-pin-error" style="min-height:1.2em"></div>' +
+        '<input id="new-pin-1" type="password" inputmode="numeric" maxlength="4" placeholder="' + T.parent.newPinPrompt + '" /><br><br>' +
+        '<input id="new-pin-2" type="password" inputmode="numeric" maxlength="4" placeholder="' + T.parent.newPinConfirmPrompt + '" /><br><br>' +
+        '<button data-action="save-new-pin">' + T.parent.setNewPinBtn + "</button>" +
+        "</div></div>"
+    );
+    bindAction("save-new-pin", function () {
+      var p1 = document.getElementById("new-pin-1").value;
+      var p2 = document.getElementById("new-pin-2").value;
+      var errorEl = document.getElementById("new-pin-error");
+      if (!MathCore.Pin.isValidFormat(p1)) { errorEl.textContent = T.parentSetup.errorPinFormat; return; }
+      if (p1 !== p2) { errorEl.textContent = T.parentSetup.errorPinMismatch; return; }
+      MathCore.Pin.hash(window.crypto, p1).then(function (pinHash) {
+        return save(function (s) { s.settings.pinHash = pinHash; });
+      }).then(function () {
+        App.parentUnlocked = true;
+        renderParentDashboard();
+      });
+    });
+  }
+
+  function renderParentDashboard() {
+    var state = S();
+    render(
+      '<div class="screen" data-screen="parent-dashboard" style="background:var(--parent-bg);justify-content:flex-start;padding-top:1rem">' +
+        '<div style="width:min(720px,94vw)">' +
+        '<button class="ghost" data-action="back">' + T.collection.backBtn + "</button>" +
+        "<h1>" + T.parent.title + "</h1>" +
+        renderSettingsSection(state) +
+        renderStorageStatusSection() +
+        renderRewardsSection(state) +
+        renderStatsSection(state) +
+        renderDataSection(state) +
+        "</div></div>"
+    );
+    bindAction("back", function () { navigate("home"); });
+    wireSettingsSection();
+    wireStorageStatusSection();
+    wireRewardsSection();
+    wireDataSection();
+  }
+
+  function renderSettingsSection(state) {
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.settingsTitle + "</h2>" +
+      "<label>" + T.parent.nameLabel + '<br><input id="set-name" type="text" value="' + escapeHtml(state.settings.childName) + '" /></label><br><br>' +
+      '<label><input id="set-challenge" type="checkbox" ' + (state.settings.challengeOn ? "checked" : "") + " /> " + T.parent.challengeLabel + "</label><br><br>" +
+      "<label>" + T.parent.timeLimitLabel + ': <span id="set-time-limit-value">' + state.settings.timeLimitSec + "</span><br>" +
+      '<input id="set-time-limit" type="range" min="' + CONFIG.MIN_TIME_LIMIT_SEC + '" max="' + CONFIG.MAX_TIME_LIMIT_SEC + '" value="' + state.settings.timeLimitSec + '" /></label><br><br>' +
+      '<label><input id="set-sound" type="checkbox" ' + (state.settings.sound ? "checked" : "") + " /> " + T.parent.soundLabel + "</label><br><br>" +
+      '<button data-action="save-settings">' + T.parent.saveSettingsBtn + "</button> " +
+      '<button class="secondary" data-action="change-pin">' + T.parent.changePinBtn + "</button>" +
+      '<div class="muted" id="settings-saved-msg" style="min-height:1.2em"></div>' +
+      "</div>"
+    );
+  }
+
+  function wireSettingsSection() {
+    var rangeInput = document.getElementById("set-time-limit");
+    rangeInput.addEventListener("input", function () {
+      document.getElementById("set-time-limit-value").textContent = rangeInput.value;
+    });
+    bindAction("save-settings", function () {
+      var name = document.getElementById("set-name").value.trim();
+      var challengeOn = document.getElementById("set-challenge").checked;
+      var timeLimitSec = Number(document.getElementById("set-time-limit").value);
+      var sound = document.getElementById("set-sound").checked;
+      save(function (s) {
+        s.settings.childName = name;
+        s.settings.challengeOn = challengeOn;
+        s.settings.timeLimitSec = timeLimitSec;
+        s.settings.sound = sound;
+      }).then(function (result) {
+        if (result.ok) document.getElementById("settings-saved-msg").textContent = T.parent.settingsSaved;
+      });
+    });
+    bindAction("change-pin", function () { renderParentNewPin(); });
+  }
+
+  function renderStorageStatusSection() {
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.storageStatusTitle + "</h2>" +
+      '<p class="ltr muted" id="storage-status-line">…</p>' +
+      "</div>"
+    );
+  }
+
+  function wireStorageStatusSection() {
+    var el = document.getElementById("storage-status-line");
+    var standalone = isStandaloneDisplay();
+    var rev = App.storage.rev;
+    function line(persistedText) {
+      return "rev " + rev + " · " + (standalone ? T.parent.standaloneYes : T.parent.standaloneNo) + " · VERSION " + APP_VERSION + " · " + persistedText;
+    }
+    el.textContent = line(T.parent.persistedUnknown);
+    if (navigator.storage && navigator.storage.persisted) {
+      navigator.storage.persisted().then(function (persisted) {
+        el.textContent = line(persisted ? T.parent.persistedYes : T.parent.persistedNo);
+      });
+    }
+  }
+
+  function renderRewardsSection(state) {
+    var rewardsHtml =
+      state.economy.rewards
+        .map(function (r) {
+          return (
+            '<div class="reward-item"><span>' + escapeHtml(r.name) + " — " + r.cost + " 🪙" + (r.active ? "" : " (הוסר)") + "</span>" +
+            (r.active ? '<button class="secondary" data-deactivate-reward="' + r.id + '">' + T.parent.deactivateBtn + "</button>" : "") +
+            "</div>"
+          );
+        })
+        .join("") || '<p class="muted">' + T.rewards.noRewards + "</p>";
+
+    var pending = state.economy.requests.filter(function (r) { return r.status === "requested"; });
+    var pendingHtml = pending.length
+      ? pending
+          .map(function (req) {
+            return (
+              '<div class="reward-item"><span>' + escapeHtml(req.nameSnapshot) + " — " + req.costSnapshot + " 🪙</span>" +
+              '<span><button data-approve-request="' + req.id + '">' + T.parent.approveBtn + "</button> " +
+              '<button class="secondary" data-reject-request="' + req.id + '">' + T.parent.rejectBtn + "</button></span></div>"
+            );
+          })
+          .join("")
+      : '<p class="muted">' + T.parent.noPendingRequests + "</p>";
+
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.rewardsTitle + "</h2>" +
+      rewardsHtml +
+      '<div style="margin-top:0.75rem">' +
+      '<input id="new-reward-name" type="text" placeholder="' + T.parent.rewardNamePlaceholder + '" /> ' +
+      '<input id="new-reward-cost" type="number" min="1" placeholder="' + T.parent.rewardCostPlaceholder + '" style="width:6em" /> ' +
+      '<button data-action="add-reward">' + T.parent.addRewardBtn + "</button>" +
+      "</div>" +
+      "<h2>" + T.parent.pendingRequestsTitle + "</h2>" +
+      '<div id="pending-requests-msg" class="muted" style="min-height:1.2em"></div>' +
+      pendingHtml +
+      "</div>"
+    );
+  }
+
+  function wireRewardsSection() {
+    bindAction("add-reward", function () {
+      var name = document.getElementById("new-reward-name").value.trim();
+      var cost = Number(document.getElementById("new-reward-cost").value);
+      if (!name || !cost || cost <= 0) return;
+      var id = "r_" + Date.now() + "_" + Math.floor(Math.random() * 1e6);
+      save(function (s) { s.economy.rewards.push({ id: id, name: name, cost: cost, active: true }); }).then(function (result) {
+        if (result.ok) renderParentDashboard();
+      });
+    });
+    document.querySelectorAll("[data-deactivate-reward]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.dataset.deactivateReward;
+        save(function (s) { MathCore.Economy.deactivateReward(s, id); }).then(function (result) {
+          if (result.ok) renderParentDashboard();
+        });
+      });
+    });
+    document.querySelectorAll("[data-approve-request]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.dataset.approveRequest;
+        var ledgerId = "l_" + id + "_redeem";
+        var approveResult = null;
+        save(function (s) { approveResult = MathCore.Economy.approveRequest(s, id, ledgerId, Date.now()); }).then(function (result) {
+          if (!result.ok) return; // stale/error already surfaced
+          if (approveResult && !approveResult.ok) {
+            document.getElementById("pending-requests-msg").textContent = T.parent.insufficientBalanceMsg;
+          } else {
+            renderParentDashboard();
+          }
+        });
+      });
+    });
+    document.querySelectorAll("[data-reject-request]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.dataset.rejectRequest;
+        save(function (s) { MathCore.Economy.rejectRequest(s, id); }).then(function (result) {
+          if (result.ok) renderParentDashboard();
+        });
+      });
+    });
+  }
+
+  function kpiTile(label, value) {
+    return '<div class="card" style="min-width:100px"><div style="font-size:1.4rem;font-weight:bold">' + value + '</div><div class="muted">' + label + "</div></div>";
+  }
+
+  function chartBlock(label, svg) {
+    return '<div><div class="muted">' + label + '</div><div dir="ltr">' + svg + "</div></div>";
+  }
+
+  function heatmapCellColor(cell) {
+    if (cell.mastery === "mastered") return "#3CC97A";
+    if (cell.mastery === "new") return "#E4E8F0";
+    var acc = cell.accuracy == null ? 0 : cell.accuracy;
+    return acc >= 0.7 ? "#FFC93C" : "#FF9F68";
+  }
+
+  // Inline SVG line chart with a <title> tooltip per point (DESIGN §9.6).
+  function lineChartSvg(values, opts) {
+    var w = 220, h = 70, pad = 6;
+    if (!values.length) return '<svg width="' + w + '" height="' + h + '"></svg>';
+    var max = Math.max.apply(null, values.concat([0]));
+    var min = Math.min.apply(null, values.concat([0]));
+    if (max === min) max = min + 1;
+    var stepX = values.length > 1 ? (w - 2 * pad) / (values.length - 1) : 0;
+    var points = values.map(function (v, i) {
+      var x = pad + i * stepX;
+      var y = h - pad - ((v - min) / (max - min)) * (h - 2 * pad);
+      return { x: x, y: y, v: v };
+    });
+    var polyline = points.map(function (p) { return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" ");
+    var circles = points
+      .map(function (p, i) {
+        var titleText = opts.format ? opts.format(p.v, i) : String(p.v);
+        return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="#4F7CFF"><title>' + escapeHtml(titleText) + "</title></circle>";
+      })
+      .join("");
+    return (
+      '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + " " + h + '">' +
+      '<polyline points="' + polyline + '" fill="none" stroke="#4F7CFF" stroke-width="2" />' +
+      circles +
+      "</svg>"
+    );
+  }
+
+  function renderStatsSection(state) {
+    var now = Date.now();
+    var totals = MathCore.Stats.totals(state, now);
+    var perFact = MathCore.Stats.perFactTable(state);
+    var totalAttempts = perFact.reduce(function (sum, f) { return sum + f.attempts; }, 0);
+    var totalCorrect = perFact.reduce(function (sum, f) { return sum + f.correct; }, 0);
+    var overallAccuracy = totalAttempts ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
+
+    var trends = MathCore.Stats.trends(state, 30);
+    var chart1 = lineChartSvg(trends.accuracy.map(function (v) { return v * 100; }), { format: function (v, i) { return "סבב " + (i + 1) + ": " + Math.round(v) + "%"; } });
+    var chart2 = lineChartSvg(trends.avgMs.map(function (v) { return v / 1000; }), { format: function (v, i) { return "סבב " + (i + 1) + ": " + v.toFixed(1) + "s"; } });
+    var chart3 = lineChartSvg(trends.masteredCount, { format: function (v, i) { return "סבב " + (i + 1) + ": " + v; } });
+    var chart4 = lineChartSvg(trends.coins, { format: function (v, i) { return "סבב " + (i + 1) + ": " + v + " 🪙"; } });
+
+    var heatmapGrid = MathCore.Stats.heatmap(state);
+    var heatmapHtml =
+      '<div class="ltr" style="display:grid;grid-template-columns:repeat(10,1fr);gap:2px;width:min(400px,90vw);margin:0.5rem auto">' +
+      heatmapGrid
+        .map(function (row) {
+          return row
+            .map(function (cell) {
+              return '<div title="' + cell.key.replace("x", "×") + " (" + cell.mastery + ')" style="aspect-ratio:1;border-radius:4px;background:' + heatmapCellColor(cell) + '"></div>';
+            })
+            .join("");
+        })
+        .join("") +
+      "</div>";
+
+    var weakest = MathCore.Stats.weakest(state, now, 8);
+    var weakestHtml = weakest.length
+      ? '<ul style="list-style:none;padding:0">' +
+        weakest
+          .map(function (key) {
+            var fact = MathCore.Facts.getFact(state, key);
+            var acc = fact.attempts ? Math.round((fact.correct / fact.attempts) * 100) : 0;
+            return "<li>" + key.replace("x", "×") + " — " + acc + "%</li>";
+          })
+          .join("") +
+        "</ul>"
+      : '<p class="muted">אין עדיין נתונים</p>';
+
+    var historyRows = state.sessions.slice(-20).reverse();
+    var historyHtml =
+      (state.active ? '<div class="reward-item"><span>' + T.parent.historyOpen + "</span><span>—</span></div>" : "") +
+      (historyRows.length
+        ? historyRows
+            .map(function (sess) {
+              var dateStr = new Date(sess.endedAt).toLocaleDateString("he-IL");
+              return '<div class="reward-item"><span>' + dateStr + " — " + sess.firstTryCorrect + "/" + sess.planned.length + "</span><span>" + sess.coinsEarned + " 🪙</span></div>";
+            })
+            .join("")
+        : '<p class="muted">אין עדיין סבבים</p>');
+
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.statsTitle + "</h2>" +
+      '<div style="display:flex;flex-wrap:wrap;gap:0.75rem;justify-content:center">' +
+      kpiTile(T.parent.kpiSessions, totals.totalSessions) +
+      kpiTile(T.parent.kpiCoins, totals.lifetimeCoins) +
+      kpiTile(T.parent.kpiMastered, totals.masteredCount + "/55") +
+      kpiTile(T.parent.kpiStreak, totals.dailyStreak) +
+      kpiTile(T.parent.kpiAccuracy, overallAccuracy + "%") +
+      "</div>" +
+      '<div style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;margin-top:1rem">' +
+      chartBlock(T.parent.trendAccuracy, chart1) +
+      chartBlock(T.parent.trendSpeed, chart2) +
+      chartBlock(T.parent.trendMastered, chart3) +
+      chartBlock(T.parent.trendCoins, chart4) +
+      "</div>" +
+      "<h3>" + T.parent.heatmapTitle + "</h3>" + heatmapHtml +
+      "<h3>" + T.parent.weakestTitle + "</h3>" + weakestHtml +
+      "<h3>" + T.parent.historyTitle + "</h3>" + historyHtml +
+      "</div>"
+    );
+  }
+
+  function renderDataSection(state) {
+    var lastExportText = state.lastExportAt ? T.parent.lastExportLabel(new Date(state.lastExportAt).toLocaleDateString("he-IL")) : T.parent.neverExported;
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.dataTitle + "</h2>" +
+      '<p class="muted">' + lastExportText + "</p>" +
+      '<button data-action="export-data">' + T.parent.exportBtn + "</button> " +
+      '<button class="secondary" data-action="trigger-import">' + T.parent.importBtn + "</button>" +
+      '<input id="import-file-input" type="file" accept="application/json" style="display:none" /><br><br>' +
+      '<button class="secondary" data-action="undo-last">' + T.parent.undoBtn + "</button><br><br>" +
+      '<button class="ghost" data-action="show-reset">' + T.parent.resetBtn + "</button>" +
+      '<div id="data-section-msg" class="muted" style="min-height:1.2em"></div>' +
+      '<div id="import-preview-area"></div>' +
+      '<div id="reset-area"></div>' +
+      "</div>"
+    );
+  }
+
+  function wireDataSection() {
+    bindAction("export-data", function () {
+      App.storage.exportJson(Date.now()).then(function (result) {
+        if (!result.ok) return;
+        var dateStr = new Date().toISOString().slice(0, 10);
+        var blob = new Blob([result.json], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "math-progress-" + dateStr + ".json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        renderParentDashboard(); // refresh lastExportAt display
+      });
+    });
+
+    bindAction("trigger-import", function () {
+      document.getElementById("import-file-input").click();
+    });
+    document.getElementById("import-file-input").addEventListener("change", function (ev) {
+      var file = ev.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var text = String(reader.result);
+        var raw;
+        try {
+          raw = JSON.parse(text);
+        } catch (e) {
+          document.getElementById("data-section-msg").textContent = "קובץ לא תקין";
+          return;
+        }
+        var validation = MathCore.Migrate.validateImport(raw);
+        if (!validation.ok) {
+          document.getElementById("data-section-msg").textContent = "קובץ לא תקין: " + validation.problems.join(", ");
+          return;
+        }
+        showImportPreview(raw, text);
+      };
+      reader.readAsText(file);
+    });
+
+    bindAction("undo-last", function () {
+      App.storage.undoLastReplace(Date.now()).then(function (result) {
+        if (result.ok) {
+          document.getElementById("data-section-msg").textContent = T.parent.undoneMsg;
+          renderParentDashboard();
+        }
+      });
+    });
+
+    bindAction("show-reset", function () { showResetConfirm(); });
+  }
+
+  function showImportPreview(raw, text) {
+    var sessionsCount = Array.isArray(raw.sessions) ? raw.sessions.length : 0;
+    var lifetimeCoins =
+      raw.economy && Array.isArray(raw.economy.ledger)
+        ? raw.economy.ledger.reduce(function (sum, e) { return e.type === "earn" ? sum + e.amount : sum; }, 0)
+        : 0;
+    var exportDate = raw.lastExportAt ? new Date(raw.lastExportAt).toLocaleDateString("he-IL") : "—";
+    var warning = S().active ? '<p class="muted">' + T.parent.importWarningActive + "</p>" : "";
+    var area = document.getElementById("import-preview-area");
+    area.innerHTML =
+      '<div class="card">' +
+      "<h3>" + T.parent.importPreviewTitle + "</h3>" +
+      "<p>" + sessionsCount + " סבבים, " + lifetimeCoins + " מטבעות, ייצוא מ-" + exportDate + "</p>" +
+      warning +
+      '<input id="import-pin" type="password" inputmode="numeric" maxlength="4" placeholder="' + T.parent.importPinPrompt + '" /><br><br>' +
+      '<button data-action="confirm-import">' + T.parent.importConfirmBtn + "</button> " +
+      '<button class="secondary" data-action="cancel-import">' + T.parent.importCancelBtn + "</button>" +
+      '<div class="muted" id="import-error" style="min-height:1.2em"></div>' +
+      "</div>";
+    bindAction("confirm-import", function () {
+      var pin = document.getElementById("import-pin").value;
+      MathCore.Pin.verify(window.crypto, pin, S().settings.pinHash).then(function (ok) {
+        if (!ok) { document.getElementById("import-error").textContent = T.parent.wrongPin; return; }
+        App.storage.importJson(text, Date.now()).then(function (result) {
+          if (result.ok) {
+            renderParentDashboard();
+          } else {
+            document.getElementById("import-error").textContent = (result.problems || [result.error || "שגיאה"]).join(", ");
+          }
+        });
+      });
+    });
+    bindAction("cancel-import", function () {
+      document.getElementById("import-preview-area").innerHTML = "";
+    });
+  }
+
+  function showResetConfirm() {
+    var area = document.getElementById("reset-area");
+    area.innerHTML =
+      '<div class="card">' +
+      "<p>" + T.parent.resetConfirmPrompt + "</p>" +
+      "<label>" + T.parent.resetTypeLabel + '<br><input id="reset-type-input" type="text" class="ltr" /></label><br><br>' +
+      "<label>" + T.parent.resetPinLabel + '<br><input id="reset-pin-input" type="password" inputmode="numeric" maxlength="4" /></label><br><br>' +
+      '<button data-action="confirm-reset">' + T.parent.resetConfirmBtn + "</button> " +
+      '<button class="secondary" data-action="cancel-reset">' + T.parent.resetCancelBtn + "</button>" +
+      '<div class="muted" id="reset-error" style="min-height:1.2em"></div>' +
+      "</div>";
+    bindAction("cancel-reset", function () { document.getElementById("reset-area").innerHTML = ""; });
+    bindAction("confirm-reset", function () {
+      var typed = document.getElementById("reset-type-input").value;
+      var pin = document.getElementById("reset-pin-input").value;
+      var errorEl = document.getElementById("reset-error");
+      if (typed !== T.parent.resetTypeConfirm) { errorEl.textContent = T.parent.resetTypeMismatch; return; }
+      MathCore.Pin.verify(window.crypto, pin, S().settings.pinHash).then(function (ok) {
+        if (!ok) { errorEl.textContent = T.parent.wrongPin; return; }
+        var current = S();
+        var fresh = MathCore.Migrate.emptyState();
+        fresh.settings.pinHash = current.settings.pinHash;
+        fresh.settings.recoveryHash = current.settings.recoveryHash;
+        fresh.settings.childName = current.settings.childName;
+        App.storage.backupThenReplace(fresh, Date.now()).then(function (result) {
+          if (result.ok) renderParentDashboard();
+        });
+      });
+    });
+  }
 
   // ------------------------------------------------------------------
   // Boot
