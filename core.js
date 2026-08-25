@@ -41,6 +41,12 @@
     UNLOCK_COUNT: 24,
     UNLOCK_BASE: 25,
     UNLOCK_STEP: 5,
+    STICKERS: [
+      "cat", "dog", "fox", "owl", "bee", "frog",
+      "fish", "duck", "panda", "koala", "lion", "tiger",
+      "zebra", "giraffe", "elephant", "monkey", "rabbit", "hedgehog",
+      "turtle", "dolphin", "butterfly", "ladybug", "unicorn", "dragon",
+    ],
 
     // Challenge mode
     DEFAULT_TIME_LIMIT_SEC: 10,
@@ -149,8 +155,144 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Economy
+  // --------------------------------------------------------------------
+  var Economy = {
+    // Base coins for one attempt. Retries and wrong answers earn 0 (I1).
+    coinsFor: function (state, key, attempt) {
+      if (attempt.retry || !attempt.ok) return 0;
+      var value = Facts.value(state, key);
+      return attempt.withinLimit ? value * CONFIG.WITHIN_LIMIT_MULTIPLIER : value;
+    },
+
+    // Appends a ledger entry; rejects (no-op) if `entry.id` already exists.
+    ledgerAppend: function (state, entry) {
+      var ledger = state.economy.ledger;
+      var exists = ledger.some(function (e) {
+        return e.id === entry.id;
+      });
+      if (exists) return { ok: false, reason: "duplicate id" };
+      ledger.push(entry);
+      return { ok: true };
+    },
+
+    sums: function (ledger) {
+      var lifetimeCoins = 0;
+      var balance = 0;
+      ledger.forEach(function (e) {
+        balance += e.amount;
+        if (e.type === "earn") lifetimeCoins += e.amount;
+      });
+      return { lifetimeCoins: lifetimeCoins, balance: balance };
+    },
+
+    unlockThreshold: function (n) {
+      return CONFIG.UNLOCK_BASE * n + CONFIG.UNLOCK_STEP * n * (n - 1) / 2;
+    },
+
+    // Sticker ids not yet in state.economy.unlocked whose threshold is met.
+    // Does not mutate state — caller applies the result.
+    newUnlocks: function (state) {
+      var lifetime = Economy.sums(state.economy.ledger).lifetimeCoins;
+      var unlockedSet = new Set(state.economy.unlocked || []);
+      var result = [];
+      for (var n = 1; n <= CONFIG.UNLOCK_COUNT; n++) {
+        if (lifetime < Economy.unlockThreshold(n)) break; // thresholds strictly increase
+        var stickerId = CONFIG.STICKERS[n - 1];
+        if (!unlockedSet.has(stickerId)) result.push(stickerId);
+      }
+      return result;
+    },
+
+    hasPerfectBonusToday: function (ledger, t) {
+      var day = new Date(t);
+      return ledger.some(function (e) {
+        if (e.type !== "earn" || !/_perfect$/.test(e.id)) return false;
+        var d = new Date(e.t);
+        return (
+          d.getFullYear() === day.getFullYear() &&
+          d.getMonth() === day.getMonth() &&
+          d.getDate() === day.getDate()
+        );
+      });
+    },
+
+    perfectBonusAmount: function (ledger, t) {
+      return Economy.hasPerfectBonusToday(ledger, t) ? 0 : CONFIG.PERFECT_BONUS;
+    },
+
+    nearPerfectBonusAmount: function (firstTryCorrect) {
+      return firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT ? CONFIG.NEAR_PERFECT_BONUS : 0;
+    },
+
+    requestReward: function (state, rewardId, id, t) {
+      var reward = state.economy.rewards.find(function (r) {
+        return r.id === rewardId && r.active;
+      });
+      if (!reward) return { ok: false, reason: "reward not found or inactive" };
+      var request = {
+        id: id,
+        rewardId: rewardId,
+        nameSnapshot: reward.name,
+        costSnapshot: reward.cost,
+        t: t,
+        status: "requested",
+      };
+      state.economy.requests.push(request);
+      return { ok: true, request: request };
+    },
+
+    approveRequest: function (state, requestId, ledgerEntryId, t) {
+      var request = state.economy.requests.find(function (r) {
+        return r.id === requestId;
+      });
+      if (!request) return { ok: false, reason: "request not found" };
+      if (request.status !== "requested") {
+        return { ok: false, reason: "already processed" };
+      }
+      var balance = Economy.sums(state.economy.ledger).balance;
+      if (balance < request.costSnapshot) {
+        return { ok: false, reason: "insufficient balance" };
+      }
+      request.status = "approved";
+      Economy.ledgerAppend(state, {
+        id: ledgerEntryId,
+        t: t,
+        type: "redeem",
+        amount: -request.costSnapshot,
+        ref: request.id,
+        note: request.nameSnapshot,
+      });
+      return { ok: true };
+    },
+
+    rejectRequest: function (state, requestId) {
+      var request = state.economy.requests.find(function (r) {
+        return r.id === requestId;
+      });
+      if (!request) return { ok: false, reason: "request not found" };
+      if (request.status !== "requested") {
+        return { ok: false, reason: "already processed" };
+      }
+      request.status = "rejected";
+      return { ok: true };
+    },
+
+    // "Deleting" a reward = deactivating it; history (requests/ledger) is untouched.
+    deactivateReward: function (state, rewardId) {
+      var reward = state.economy.rewards.find(function (r) {
+        return r.id === rewardId;
+      });
+      if (!reward) return { ok: false, reason: "reward not found" };
+      reward.active = false;
+      return { ok: true };
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
+    Economy: Economy,
   };
 });
