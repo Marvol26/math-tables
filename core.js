@@ -847,6 +847,7 @@
           sound: true,
           pinHash: null,
           recoveryHash: null,
+          forceNumpad: null,
         },
         economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
         facts: {},
@@ -880,6 +881,9 @@
           sound: typeof rs.sound === "boolean" ? rs.sound : true,
           pinHash: rs.pinHash || null,
           recoveryHash: rs.recoveryHash || null,
+          // null = auto-detect by pointer type; true/false = explicit override
+          // from the question screen's "הצג מקלדת" toggle (DESIGN §9.2).
+          forceNumpad: typeof rs.forceNumpad === "boolean" ? rs.forceNumpad : null,
         },
         economy: {
           ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],

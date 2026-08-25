@@ -86,3 +86,18 @@ test("recompute() self-heals a missing unlock implied by the ledger", () => {
   Migrate.recompute(state);
   assert.deepEqual(state.economy.unlocked, [CONFIG.STICKERS[0], CONFIG.STICKERS[1]]);
 });
+
+test("[WP3 regression] migrate() preserves settings.forceNumpad across a reload (every boot calls migrate())", () => {
+  const raw = sampleRaw();
+  raw.settings.forceNumpad = true;
+  const state = Migrate.migrate(raw);
+  assert.equal(state.settings.forceNumpad, true);
+
+  const rawFalse = sampleRaw();
+  rawFalse.settings.forceNumpad = false;
+  assert.equal(Migrate.migrate(rawFalse).settings.forceNumpad, false);
+
+  // absent -> defaults to null (auto-detect), not dropped/undefined
+  const rawAbsent = sampleRaw();
+  assert.equal(Migrate.migrate(rawAbsent).settings.forceNumpad, null);
+});
