@@ -87,6 +87,12 @@
       return [Number(pieces[0]), Number(pieces[1])];
     },
 
+    // Product for a directional "asked" string (e.g. "7x2" -> 14).
+    answer: function (asked) {
+      var p = Facts.parts(asked);
+      return p[0] * p[1];
+    },
+
     tier: function (key) {
       var p = Facts.parts(key);
       var m = Math.max(p[0], p[1]);
@@ -427,10 +433,263 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // SessionCore — pure state transitions on state.active (DESIGN §6, §7)
+  // --------------------------------------------------------------------
+  var SessionCore = {
+    // Creates state.active from a fresh plan. Mutates `state`, returns state.active.
+    start: function (state, rng, now) {
+      var planned = Selector.plan(state, rng, now);
+      var active = {
+        id: "s_" + now + "_" + Math.floor(rng() * 1e6),
+        startedAt: now,
+        settingsSnapshot: {
+          challengeOn: !!state.settings.challengeOn,
+          timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+        },
+        planned: planned.slice(),
+        queue: planned.slice(),
+        retryQueue: [],
+        attempts: [],
+        current: null,
+      };
+      state.active = active;
+      return active;
+    },
+
+    // Paints the next question. If a question is already displayed (current
+    // set, unanswered) this call represents a resume after a relaunch/lifecycle
+    // interruption: mark it interrupted, keep the original shownAt (no restart).
+    paint: function (state, now) {
+      var active = state.active;
+      if (!active) throw new Error("no active session");
+      if (active.current) {
+        active.current.interrupted = true;
+        return active.current;
+      }
+      var fromRetry = active.queue.length === 0 && active.retryQueue.length > 0;
+      var asked = fromRetry ? active.retryQueue[0] : active.queue[0];
+      if (!asked) return null; // nothing left to paint; caller should finish()
+      var key = Facts.key.apply(null, Facts.parts(asked));
+      active.current = {
+        key: key,
+        asked: asked,
+        shownAt: now,
+        interrupted: false,
+        retry: fromRetry,
+      };
+      return active.current;
+    },
+
+    // Marks the currently displayed question interrupted without changing shownAt
+    // (e.g. visibilitychange while a question is on screen, independent of submit).
+    markInterrupted: function (state) {
+      var active = state.active;
+      if (active && active.current) active.current.interrupted = true;
+    },
+
+    submit: function (state, answer, now, opts) {
+      var active = state.active;
+      if (!active || !active.current) throw new Error("no current question to submit");
+      var current = active.current;
+      if (opts && opts.hidden) current.interrupted = true;
+
+      var ok = Number(answer) === Facts.answer(current.asked);
+      var ms = now - current.shownAt;
+      var withinLimit =
+        active.settingsSnapshot.challengeOn &&
+        !current.interrupted &&
+        ms <= active.settingsSnapshot.timeLimitSec * 1000;
+
+      var attemptRecord = {
+        key: current.key,
+        asked: current.asked,
+        answer: Number(answer),
+        ok: ok,
+        ms: ms,
+        retry: !!current.retry,
+        withinLimit: withinLimit,
+        interrupted: !!current.interrupted,
+        coins: 0,
+        t: now,
+      };
+
+      if (!current.retry) {
+        Facts.updateFromAttempt(state, current.key, {
+          ok: ok,
+          ms: ms,
+          asked: current.asked,
+          t: now,
+          withinLimit: withinLimit,
+          interrupted: !!current.interrupted,
+          retry: false,
+        });
+        attemptRecord.coins = Economy.coinsFor(state, current.key, {
+          ok: ok,
+          retry: false,
+          withinLimit: withinLimit,
+        });
+      }
+
+      active.attempts.push(attemptRecord);
+
+      if (!current.retry) {
+        active.queue.shift();
+      } else {
+        active.retryQueue.shift();
+      }
+      if (!ok) {
+        active.retryQueue.push(current.asked);
+      }
+      active.current = null;
+
+      return {
+        ok: ok,
+        coins: attemptRecord.coins,
+        correctAnswer: Facts.answer(current.asked),
+        interrupted: attemptRecord.interrupted,
+      };
+    },
+
+    // Only valid when both queues are empty. Finalizes the session in one
+    // logical write: updates ledger/unlocks/carryover, pushes the session
+    // record, clears state.active. Idempotent by session id (I2).
+    finish: function (state, now) {
+      var active = state.active;
+      if (!active) return null;
+      if (state.sessions.some(function (s) { return s.id === active.id; })) {
+        state.active = null;
+        return null;
+      }
+      if (active.queue.length > 0 || active.retryQueue.length > 0) {
+        throw new Error("cannot finish: queue/retryQueue not empty");
+      }
+
+      var sid = active.id;
+      var firstAttempts = active.attempts.filter(function (a) { return !a.retry; });
+      var firstTryCorrect = firstAttempts.filter(function (a) { return a.ok; }).length;
+      var misses = [];
+      firstAttempts.forEach(function (a) {
+        if (!a.ok && misses.indexOf(a.key) === -1) misses.push(a.key);
+      });
+      var totalMs = firstAttempts.reduce(function (sum, a) { return sum + a.ms; }, 0);
+      var baseCoins = active.attempts.reduce(function (sum, a) { return sum + a.coins; }, 0);
+
+      var earnAmount = baseCoins;
+      Economy.ledgerAppend(state, {
+        id: "l_" + sid + "_earn",
+        t: now,
+        type: "earn",
+        amount: earnAmount,
+        ref: sid,
+        note: "session",
+      });
+      var totalCoins = earnAmount;
+
+      // Streak bonus: every 5th consecutive first-attempt correct (retries excluded).
+      var streakRun = 0;
+      var streakCount = 0;
+      firstAttempts.forEach(function (a) {
+        if (a.ok) {
+          streakRun++;
+          if (streakRun % CONFIG.STREAK_LENGTH === 0) {
+            streakCount++;
+            var amount = CONFIG.STREAK_BONUS;
+            Economy.ledgerAppend(state, {
+              id: "l_" + sid + "_streak_" + streakRun,
+              t: now,
+              type: "earn",
+              amount: amount,
+              ref: sid,
+              note: "streak",
+            });
+            totalCoins += amount;
+          }
+        } else {
+          streakRun = 0;
+        }
+      });
+
+      var perfect = firstTryCorrect === active.planned.length;
+      if (perfect) {
+        var perfectAmount = Economy.perfectBonusAmount(state.economy.ledger, now);
+        if (perfectAmount > 0) {
+          Economy.ledgerAppend(state, {
+            id: "l_" + sid + "_perfect",
+            t: now,
+            type: "earn",
+            amount: perfectAmount,
+            ref: sid,
+            note: "perfect",
+          });
+          totalCoins += perfectAmount;
+        }
+      } else {
+        var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect);
+        if (nearAmount > 0) {
+          Economy.ledgerAppend(state, {
+            id: "l_" + sid + "_near",
+            t: now,
+            type: "earn",
+            amount: nearAmount,
+            ref: sid,
+            note: "near-perfect",
+          });
+          totalCoins += nearAmount;
+        }
+      }
+
+      var unlocksEarned = Economy.newUnlocks(state);
+      state.economy.unlocked = (state.economy.unlocked || []).concat(unlocksEarned);
+
+      var masteredAfter = Facts.allKeys().filter(function (k) {
+        return Facts.mastery(Facts.getFact(state, k)) === "mastered";
+      }).length;
+
+      var leftoverCarryover = (state.carryover || []).slice(CONFIG.SESSION_SIZE);
+      var nextCarryover = [];
+      misses.concat(leftoverCarryover).forEach(function (k) {
+        if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
+      });
+
+      var session = {
+        id: sid,
+        startedAt: active.startedAt,
+        endedAt: now,
+        abandoned: false,
+        challengeOn: active.settingsSnapshot.challengeOn,
+        timeLimitSec: active.settingsSnapshot.timeLimitSec,
+        planned: active.planned.slice(),
+        attempts: active.attempts.slice(),
+        firstTryCorrect: firstTryCorrect,
+        totalMs: totalMs,
+        misses: misses,
+        coinsEarned: totalCoins,
+        perfect: perfect,
+        masteredAfter: masteredAfter,
+        unlocksEarned: unlocksEarned,
+      };
+
+      state.sessions.push(session);
+      if (state.sessions.length > CONFIG.ATTEMPTS_RETENTION_SESSIONS) {
+        var cutoff = state.sessions.length - CONFIG.ATTEMPTS_RETENTION_SESSIONS;
+        for (var i = 0; i < cutoff; i++) {
+          delete state.sessions[i].attempts;
+        }
+      }
+
+      state.carryover = nextCarryover;
+      state.active = null;
+
+      return session;
+    },
+  };
+
   return {
     CONFIG: CONFIG,
     Facts: Facts,
     Economy: Economy,
     Selector: Selector,
+    SessionCore: SessionCore,
   };
 });
