@@ -950,6 +950,21 @@
       if (raw.settings !== undefined && (typeof raw.settings !== "object" || raw.settings === null)) {
         problems.push("settings must be an object");
       }
+      if (raw.carryover !== undefined && !Array.isArray(raw.carryover)) {
+        problems.push("carryover must be an array");
+      }
+      if (raw.active !== undefined && raw.active !== null) {
+        if (typeof raw.active !== "object" || Array.isArray(raw.active)) {
+          problems.push("active must be an object or null");
+        } else {
+          var a = raw.active;
+          if (!Array.isArray(a.planned)) problems.push("active.planned must be an array");
+          if (!Array.isArray(a.queue)) problems.push("active.queue must be an array");
+          if (!Array.isArray(a.retryQueue)) problems.push("active.retryQueue must be an array");
+          if (!Array.isArray(a.attempts)) problems.push("active.attempts must be an array");
+          if (typeof a.id !== "string" || !a.id) problems.push("active.id must be a non-empty string");
+        }
+      }
       return { ok: problems.length === 0, problems: problems };
     },
 

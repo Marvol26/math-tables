@@ -51,6 +51,32 @@ test("validateImport() accepts a well-formed raw blob", () => {
   assert.deepEqual(result.problems, []);
 });
 
+test("validateImport() rejects carryover that is not an array", () => {
+  const raw = sampleRaw();
+  raw.carryover = "6x7";
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("carryover") !== -1));
+});
+
+test("validateImport() rejects an active session missing queue/retryQueue/attempts (would crash SessionCore.paint)", () => {
+  const raw = sampleRaw();
+  raw.active = { id: "s_active", startedAt: 1, planned: ["6x7"] }; // missing queue, retryQueue, attempts
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("active.queue") !== -1));
+  assert.ok(result.problems.some((p) => p.indexOf("active.retryQueue") !== -1));
+  assert.ok(result.problems.some((p) => p.indexOf("active.attempts") !== -1));
+});
+
+test("validateImport() rejects an active session with a non-string id", () => {
+  const raw = sampleRaw();
+  raw.active = { id: 123, planned: [], queue: [], retryQueue: [], attempts: [] };
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("active.id") !== -1));
+});
+
 test("an imported suspended session is preserved with current.interrupted=true", () => {
   const raw = sampleRaw();
   raw.active = {
