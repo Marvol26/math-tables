@@ -467,6 +467,13 @@
           sums.forEach(function (sum) {
             unseenOrdered.push.apply(unseenOrdered, fisherYatesShuffle(bySum[sum].slice(), rng));
           });
+          // Journey map: unseen facts of the CURRENT station's table are introduced
+          // first (sum order kept within each half). Without this the sum-ascending
+          // intro would light stations out of path order and in bursts (review
+          // 2026-08-27, HIGH). The mild weakness bonus below handles seen facts.
+          var focusFirst = unseenOrdered.filter(function (k) { return Selector.isFocusFact(state, k); });
+          var others = unseenOrdered.filter(function (k) { return !Selector.isFocusFact(state, k); });
+          unseenOrdered = focusFirst.concat(others);
           for (var u = 0; u < unseenOrdered.length && nonMasteredSlots > 0; u++) {
             if (tryAdd(unseenOrdered[u])) nonMasteredSlots--;
           }

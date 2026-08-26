@@ -59,8 +59,19 @@ test("carryover overflow beyond SESSION_SIZE: only the first 10 (FIFO order) ent
   assert.ok(!keys.includes("2x4"));
 });
 
-test("first-ever session (all facts unseen, no carryover) = the 10 smallest-sum facts", () => {
+test("first-ever session (all facts unseen, no carryover) = the current station's (×1) 10 facts", () => {
   const state = emptyState();
+  const planned = Selector.plan(state, seededRng(3), 1000);
+  const keys = keysOf(planned);
+  assert.equal(keys.length, 10);
+  const table1 = Facts.allKeys().filter((k) => Facts.parts(k)[0] === 1);
+  assert.deepEqual(new Set(keys), new Set(table1));
+});
+
+test("with every station reached, the first session falls back to the 10 smallest-sum facts", () => {
+  const state = emptyState();
+  state.map = { reached: {} };
+  CONFIG.MAP_PATH.forEach((n) => { state.map.reached[n] = 1; });
   const planned = Selector.plan(state, seededRng(3), 1000);
   const keys = keysOf(planned);
   assert.equal(keys.length, 10);

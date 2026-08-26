@@ -275,6 +275,7 @@
       learnedItem: function (a, b, product) { return a + " × " + b + " = " + product; },
       unlockReveal: "פתחת מדבקה חדשה!",
       stationReached: function (table) { return "הגעת לתחנה " + tableTag(table) + "! 🎉"; },
+      stationsReached: function (tables) { return "הגעת ל-" + bdi(tables.length) + " תחנות: " + tables.map(tableTag).join(" ") + " 🎉"; },
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
       coinsEarned: function (n) { return bdi("+" + n) + " 🪙"; },
@@ -490,6 +491,7 @@
   // ------------------------------------------------------------------
   // Boot / storage glue
   // ------------------------------------------------------------------
+  var mapSelectedStation = null; // journey map: tapped station (reset when leaving the map)
   var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null, updateAvailable: false };
   window.App = App;
 
@@ -607,6 +609,7 @@
     if (lastRoutedScreen === "parent" && currentHashScreen() !== "parent") {
       App.parentUnlocked = false;
     }
+    if (lastRoutedScreen === "map" && currentHashScreen() !== "map") mapSelectedStation = null; // any way of leaving
     var state = S();
     if (!state.settings.pinHash) {
       Screens.parentSetup();
@@ -1145,8 +1148,9 @@
           return '<span class="ltr">' + T.summary.learnedItem(p[0], p[1], MathCore.Facts.answer(key)) + "</span>";
         }).join(", ") + "</p>"
       : "";
-    var stationHtml = (session.stationsReached || []).length
-      ? (session.stationsReached || []).map(function (n) { return '<div class="station-banner">' + T.summary.stationReached(n) + "</div>"; }).join("")
+    var reached = session.stationsReached || [];
+    var stationHtml = reached.length
+      ? '<div class="station-banner">' + (reached.length === 1 ? T.summary.stationReached(reached[0]) : T.summary.stationsReached(reached)) + "</div>"
       : "";
     var unlockHtml = session.unlocksEarned.length
       ? "<p>" + T.summary.unlockReveal + "</p><div>" + session.unlocksEarned.map(function (id) { return '<span class="sticker-reveal">' + stickerArt(id) + "</span>"; }).join(" ") + "</div>"
@@ -1181,8 +1185,6 @@
   // ------------------------------------------------------------------
   // Screen: Journey map (docs/MAP-DESIGN.md)
   // ------------------------------------------------------------------
-  var mapSelectedStation = null;
-
   Screens.map = function () {
     var state = S();
     var rows = MathCore.Map.overview(state);
@@ -1204,6 +1206,7 @@
       var turtle = row.current ? '<text class="map-turtle" x="' + (p.x + (p.x < 200 ? R + 10 : -R - 36)) + '" y="' + (p.y + 9) + '">🐢</text>' : "";
       return (
         '<g class="map-node" data-table="' + row.table + '" style="cursor:pointer">' + ring +
+        '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + (R + 12) + '" fill="transparent" />' + // ≥44 px hit area on small phones
         '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + R + '" fill="' + fill + '" />' +
         '<text class="map-station-label" x="' + p.x + '" y="' + (p.y + 6) + '" text-anchor="middle">×' + row.table + "</text>" +
         '<text class="map-progress-label" x="' + p.x + '" y="' + (p.y + R + 16) + '" text-anchor="middle">' + row.progress + "/" + row.required + "</text>" +
@@ -1236,8 +1239,8 @@
       '<div class="screen" data-screen="map">' +
         "<h1>" + T.map.title + "</h1>" +
         (allDone ? "<p>" + T.map.doneAll + "</p>" : "") +
+        (detail || '<div class="muted">' + T.map.tapHint + "</div>") + // above the map so a tap is always visible
         '<div class="map-wrap">' + svg + "</div>" +
-        (detail || '<div class="muted">' + T.map.tapHint + "</div>") +
         '<button class="secondary" data-action="back">' + T.map.backBtn + "</button>" +
         "</div>"
     );
@@ -1247,6 +1250,8 @@
         var t = Number(g.getAttribute("data-table"));
         mapSelectedStation = mapSelectedStation === t ? null : t;
         Screens.map();
+        var card = document.querySelector('[data-screen="map"] .card');
+        if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
       });
     });
   };

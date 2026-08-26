@@ -11,8 +11,8 @@ A winding path with **10 stations, one per multiplication table**, in a learning
 - **Station progress** = mastered facts of that table / 10 (mastery as in DESIGN §7: 3 correct first attempts, median ≤ 6 s).
 - **Station reached** when progress hits **10/10** (`CONFIG.STATION_REQUIRED = 10`). Reaching is **permanent** (`state.map.reached[n] = timestamp`) — a later slip dims the ⭐ to ☆ (progress shows 9/10) but the station stays reached and the turtle never walks back. **Never falls.**
 - **Turtle position** = the first station in path order that is not reached. All 10 reached → the turtle is at the 🏰 with a crown 👑.
-- **Practice follows the map**: the session selector gives facts of the *current* station's table a mild priority in the "weakest/unseen" phase (`CONFIG.MAP_FOCUS_BONUS = 1.5` on the weakness score). Carryover and mastered-review rules are unchanged, so she still sees other tables; the current table just appears a bit more often.
-- **Celebration**: when `finish()` reaches a new station, the summary gets a banner "הגעת לתחנה ×5! 🎉" with the station badge popping in, confetti, and the unlock sound; Home shows "תחנה חדשה!" once.
+- **Practice follows the map**: unseen facts of the *current* station's table are introduced before other unseen facts (sum order kept within each group), and seen facts of that table get a mild priority (`CONFIG.MAP_FOCUS_BONUS = 1.5` on the weakness score). Amended after review (2026-08-27): the earlier bonus-only rule was inert until every fact had been seen, so stations lit out of order and in bursts. Carryover and mastered-review rules are unchanged, so she still sees other tables; the current table just appears a bit more often.
+- **Celebration**: when `finish()` reaches a new station, the summary gets a banner "הגעת לתחנה ×5! 🎉" with the station badge popping in, confetti, and the unlock sound; several stations in one session share one banner.
 
 ## 3. Screens
 - **Map screen**: vertical zig-zag path (SVG, fits any portrait width; landscape scrolls), stations as round badges "×5" with a state: reached (gold, ⭐), current (blue ring, 🐢 beside it, "3/10"), ahead (grey, "0/10"). Tapping a station shows its 10 facts as small chips coloured by mastery (green/orange/grey) — read-only, no practice from here (sessions stay the only way to play, D4). Back button.
@@ -29,4 +29,4 @@ Animal titles / XP levels; practice launched from a station; per-station rewards
 Table facts = 10 per table, shared facts counted; progress/reached/current computations; reached is monotone (mastery drop keeps it); path order; selector bonus applied only to the current table and never duplicates or breaks carryover-first; migrate defaults `map` and import validation accepts/rejects its shape.
 
 ## 7. Decisions (Marat, 2026-08-27)
-(a) Learning order. (b) Reached at 10/10. (c) Mild practice priority for the current table.
+(a) Learning order. (b) Reached at 10/10. (c) Practice priority for the current table (unseen-first + mild bonus, see §2).

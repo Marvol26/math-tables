@@ -46,7 +46,7 @@ test("reaching is permanent: a mastery drop keeps the station and the turtle pos
   assert.deepEqual(Map.newlyReached(state), []);
 });
 
-test("finish() records stationsReached and persists them in state.map", () => {
+test("finish() records stationsReached and persists them in state.map (table pre-mastered; exercises finish → newlyReached → state.map)", () => {
   const state = Migrate.emptyState();
   Map.tableKeys(1).slice(0, 9).forEach((k) => masterFact(state, k));
   const rng = () => 0.5;
@@ -94,4 +94,48 @@ test("migrate defaults map; validateImport accepts a good map and rejects a bad 
   assert.equal(Migrate.validateImport(raw).ok, false);
   raw.map = { reached: { 3: "yes" } };
   assert.equal(Migrate.validateImport(raw).ok, false);
+});
+
+// --- review 2026-08-27 ---
+test("[review] plan(): with a partly-seen state, unseen facts of the current station come before other unseen facts", () => {
+  const state = Migrate.emptyState();
+  state.map.reached[1] = 1; state.map.reached[2] = 1; // current station ×10
+  // mark a scattering of other facts as seen so the sum-ascending intro would otherwise win
+  ["3x3", "3x4", "4x4", "3x5", "4x5", "5x5"].forEach((k) => { const f = (state.facts[k] = Facts.emptyFact()); f.attempts = 1; f.correct = 1; f.lastSeen = 1; f.recent = [{ ok: true, ms: 3000, asked: k, t: 1, withinLimit: false, interrupted: false }]; });
+  const plan = Selector.plan(state, () => 0.3, 1000);
+  const canon = plan.map((asked) => { const p = Facts.parts(asked); return Facts.key(p[0], p[1]); });
+  const focus = canon.filter((k) => { const p = Facts.parts(k); return p[0] === 10 || p[1] === 10; });
+  assert.ok(focus.length >= 7, "expected most of the plan to be ×10 facts, got " + focus.length + " of " + canon.length);
+});
+
+test("[review] overview(): 10 rows in path order with exactly one current station", () => {
+  const state = Migrate.emptyState();
+  state.map.reached[1] = 5;
+  const rows = Map.overview(state);
+  assert.deepEqual(rows.map((r) => r.table), CONFIG.MAP_PATH);
+  assert.equal(rows.filter((r) => r.current).length, 1);
+  assert.equal(rows[1].current, true);
+  assert.equal(rows[0].reached, true);
+  assert.equal(rows[0].reachedAt, 5);
+});
+
+test("[review] validateImport accepts sessions without stationsReached (pre-0.6 backups)", () => {
+  const raw = Migrate.emptyState();
+  raw.sessions = [{ id: "s_old", startedAt: 1, endedAt: 2, planned: ["1x2"], firstTryCorrect: 1, totalMs: 10, misses: [], coinsEarned: 1, perfect: false, masteredAfter: 0, unlocksEarned: [] }];
+  assert.equal(Migrate.validateImport(raw).ok, true);
+});
+
+test("[review] finish() can reach several stations at once (upgrade-day state) and records all of them", () => {
+  const state = Migrate.emptyState();
+  Map.tableKeys(1).forEach((k) => masterFact(state, k));
+  Map.tableKeys(2).forEach((k) => masterFact(state, k));
+  SessionCore.start(state, () => 0.5, 1000);
+  let guard = 0, session = null;
+  while (state.active && guard++ < 40) {
+    SessionCore.paint(state, 2000 + guard * 100);
+    SessionCore.submit(state, Facts.answer(state.active.current.asked), 2050 + guard * 100, {});
+    if (!state.active.queue.length && !state.active.retryQueue.length) session = SessionCore.finish(state, 5000);
+  }
+  assert.deepEqual(session.stationsReached, [1, 2]);
+  assert.equal(Map.currentStation(state), 10);
 });
