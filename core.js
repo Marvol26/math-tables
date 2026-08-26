@@ -488,8 +488,16 @@
           learningPool.sort(function (x, y) {
             return Selector.weaknessScore(state, y, now) - Selector.weaknessScore(state, x, now);
           });
-          var poolSize = Math.min(learningPool.length, nonMasteredSlots + 6);
-          var candidatePool = fisherYatesShuffle(learningPool.slice(0, poolSize), rng);
+          // Journey map: the current station's unmastered facts are taken first
+          // (weakest first), so a station cannot stall while stations ahead of it
+          // light up; the shuffled weakest pool fills whatever is left (variety).
+          var focusLearning = learningPool.filter(function (k) { return Selector.isFocusFact(state, k); });
+          for (var fl = 0; fl < focusLearning.length && nonMasteredSlots > 0; fl++) {
+            if (tryAdd(focusLearning[fl])) nonMasteredSlots--;
+          }
+          var restLearning = learningPool.filter(function (k) { return !used.has(k); });
+          var poolSize = Math.min(restLearning.length, nonMasteredSlots + 6);
+          var candidatePool = fisherYatesShuffle(restLearning.slice(0, poolSize), rng);
           for (var w = 0; w < candidatePool.length && nonMasteredSlots > 0; w++) {
             if (tryAdd(candidatePool[w])) nonMasteredSlots--;
           }

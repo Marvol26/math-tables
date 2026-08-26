@@ -139,3 +139,16 @@ test("[review] finish() can reach several stations at once (upgrade-day state) a
   assert.deepEqual(session.stationsReached, [1, 2]);
   assert.equal(Map.currentStation(state), 10);
 });
+
+test("[review] plan(): on a fully-seen state the current station's unmastered facts fill the plan before other tables", () => {
+  const state = Migrate.emptyState();
+  state.map.reached[1] = 1; state.map.reached[2] = 1; // current ×10
+  Facts.allKeys().forEach((k) => { const f = (state.facts[k] = Facts.emptyFact()); f.attempts = 2; f.correct = 1; f.lastSeen = 1; f.recent = [{ ok: true, ms: 3000, asked: k, t: 1, withinLimit: false, interrupted: false }, { ok: false, ms: 5000, asked: k, t: 2, withinLimit: false, interrupted: false }]; });
+  Map.tableKeys(1).concat(Map.tableKeys(2)).forEach((k) => masterFact(state, k));
+  const plan = Selector.plan(state, () => 0.7, 1000);
+  const canon = plan.map((asked) => { const p = Facts.parts(asked); return Facts.key(p[0], p[1]); });
+  const focus = canon.filter((k) => { const p = Facts.parts(k); return p[0] === 10 || p[1] === 10; });
+  // ×10 has 10 facts, two of them (1x10, 2x10) already mastered → 8 unmastered focus facts must all be in the plan
+  assert.equal(focus.length, 8, "got " + focus.length + " ×10 facts in " + JSON.stringify(canon));
+  assert.equal(new Set(canon).size, canon.length);
+});
