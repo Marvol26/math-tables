@@ -47,8 +47,13 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
    times during this build (WP3, twice in later self-review) — grep for
    `MathCore\.(SessionCore|Economy|Pin|Migrate)\.` before every commit and
    confirm each call sits inside a `save(function (s) { ... })` mutator.
-7. **Bump `sw.js`'s `VERSION` on every deploy.** The update toast (shown
-   only on Home, never mid-session) depends on it changing.
+7. **Bump the version in THREE places on every deploy:** `sw.js` `VERSION`
+   (drives the cache + the update toast, shown only on Home), `APP_VERSION`
+   in `index.html`, and the `core.js?v=<APP_VERSION>` query in both the
+   `<script src>` of `index.html` and `sw.js` `PRECACHE_URLS`. The `?v=`
+   exists because an HTTP-cached stale `core.js` next to a fresh `index.html`
+   froze feedback live on 2026-08-27; the SW also precaches with
+   `cache: "reload"` for the same reason.
 8. **No `innerHTML` with unescaped user-provided data** (child name, reward
    names) — always run through `escapeHtml()` first.
 
