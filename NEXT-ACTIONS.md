@@ -124,3 +124,8 @@ Marat wants them formalized:
 ## Second-brain distillation (standing rule 6)
 Not yet written — per the plan, this is designer-owned at close-out with
 Marat's affirmative yes, not something the executor writes to `~/brain`.
+
+
+## After the journey map (2026-08-27)
+- If the turtle visibly sits at 9/10 for weeks while stations ahead light up: consider relaxing mastery to "3 of the last 4 first attempts correct" (`Facts.mastery`, CONFIG) — the reviewer's simulation showed a flat-85% child stalling ~17 sessions at ×5. Not a selector issue.
+- Marat's device pass for 0.6.0: open המפה שלי, tap a station, finish a session that completes a table (banner + fireworks).
