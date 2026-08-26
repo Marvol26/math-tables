@@ -96,6 +96,20 @@
   @keyframes dot-in { to { opacity: 1; transform: scale(1); } }
   .dot-array-caption { font-weight: bold; color: var(--text); }
   .chart-value { font: 10px sans-serif; fill: #2B2D42; }
+  /* Journey map (docs/MAP-DESIGN.md) */
+  .map-wrap { width: min(420px, 94vw); direction: ltr; unicode-bidi: isolate; }
+  .map-svg { width: 100%; height: auto; display: block; }
+  .map-station-label { font: bold 16px "Varela Round", sans-serif; fill: #fff; }
+  .map-progress-label { font: 12px sans-serif; fill: #2B2D42; }
+  .map-turtle { font-size: 26px; }
+  .map-current-ring { animation: ring-pulse 1.6s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+  @keyframes ring-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+  .fact-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; direction: ltr; }
+  .fact-chip { padding: 0.25rem 0.55rem; border-radius: 999px; font-weight: bold; font-size: 0.9rem; background: #E4E8F0; color: var(--text); }
+  .fact-chip.learning { background: var(--wrong); }
+  .fact-chip.mastered { background: var(--correct); color: #fff; }
+  .station-banner { background: var(--gold); border-radius: 16px; padding: 0.6rem 1rem; font-weight: bold; animation: pop 0.8s ease; }
+  .map-status { color: var(--muted); font-size: 0.95rem; }
   .chart-axis { font: 9px sans-serif; fill: #8D99AE; }
   .feedback-correct .equation { animation: flash-green 0.5s ease; }
   .feedback-wrong .equation { animation: shake 0.5s ease; }
@@ -121,7 +135,7 @@
   .reward-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(420px, 92vw); }
   .banner { position: fixed; left: 0; right: 0; text-align: center; padding: 0.6rem 1rem; z-index: 800; }
   @media (prefers-reduced-motion: reduce) {
-    .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect, .turtle, .turtle-zzz { animation: none; }
+    .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect, .turtle, .turtle-zzz, .map-current-ring, .station-banner { animation: none; }
     .dot-array span { animation: none; opacity: 1; }
     .confetti-layer, .fireworks { display: none; }
   }
@@ -186,7 +200,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.5.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.6.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -206,6 +220,9 @@
       startCta: "בואי נתחיל!",
       resumeCta: "ממשיכות!",
       greeting: function (name) { return "היי, " + name + "!"; },
+      mapBtn: "המפה שלי 🗺️",
+      mapStatus: function (table, progress, required) { return "🐢 את בתחנה " + bdi("×" + table) + " · " + bdi(progress + "/" + required); },
+      mapDone: "🐢👑 הגעת לטירה! כל התחנות שלך",
       collectionBtn: "האוסף שלי 🎁",
       rewardsBtn: "פרסים 🎈",
       parentBtn: "הורים",
@@ -257,9 +274,23 @@
       learnedToday: "למדנו היום",
       learnedItem: function (a, b, product) { return a + " × " + b + " = " + product; },
       unlockReveal: "פתחת מדבקה חדשה!",
+      stationReached: function (table) { return "הגעת לתחנה " + bdi("×" + table) + "! 🎉"; },
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
       coinsEarned: function (n) { return bdi("+" + n) + " 🪙"; },
+    },
+
+    map: {
+      title: "המפה שלי",
+      backBtn: "חזרה",
+      castle: "🏰",
+      stationTitle: function (table) { return "תחנה " + bdi("×" + table); },
+      reachedLabel: "הגעת! ⭐",
+      currentLabel: "כאן את עכשיו 🐢",
+      aheadLabel: "עוד לא",
+      tapHint: "לחצי על תחנה כדי לראות את התרגילים שלה",
+      chipsLegend: "ירוק = יודעת מצוין · כתום = בלמידה · אפור = עוד לא ניסית",
+      doneAll: "כל התחנות הושלמו! 👑",
     },
 
     collection: {
@@ -324,6 +355,7 @@
       kpiCoins: "מטבעות (סה\"כ)",
       kpiMastered: "נלמדו לגמרי",
       kpiStreak: "רצף ימים",
+      kpiMap: "תחנות במפה",
       kpiAccuracy: "דיוק כללי",
       trendAccuracy: "דיוק (30 סבבים אחרונים)",
       trendSpeed: "זמן ממוצע (מ\"ש)",
@@ -453,7 +485,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.5.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.6.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -685,6 +717,8 @@
     var daysSinceExport = lastExport ? (Date.now() - lastExport) / (1000 * 60 * 60 * 24) : Infinity;
     var showBackup = daysSinceExport > 14 && state.sessions.length > 0;
     var childName = (state.settings.childName || "").trim();
+    var station = MathCore.Map.currentStation(state);
+    var mapLine = station === null ? T.home.mapDone : T.home.mapStatus(station, MathCore.Map.progress(state, station), CONFIG.STATION_REQUIRED);
 
     render(
       '<div class="screen" data-screen="home">' +
@@ -692,8 +726,10 @@
         (childName ? "<h2>" + T.home.greeting(escapeHtml(childName)) + "</h2>" : "") +
         '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
+        '<div class="map-status">' + mapLine + "</div>" +
         '<button data-action="play">' + (hasActive ? T.home.resumeCta : T.home.startCta) + "</button>" +
-        '<div><button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
+        '<div><button class="secondary" data-action="nav-map">' + T.home.mapBtn + "</button> " +
+        '<button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
         '<button class="secondary" data-action="nav-rewards">' + T.home.rewardsBtn + "</button></div>" +
         (showInstall ? '<div id="install-banner">' + T.home.installBanner + "</div>" : "") +
         (showBackup ? '<div id="backup-banner">' + T.home.backupBanner + "</div>" : "") +
@@ -704,6 +740,7 @@
     bindAction("play", startOrResumeSession);
     bindAction("nav-collection", function () { navigate("collection"); });
     bindAction("nav-rewards", function () { navigate("rewards"); });
+    bindAction("nav-map", function () { navigate("map"); });
     bindAction("nav-parent", function () { navigate("parent"); });
   };
 
@@ -1104,6 +1141,9 @@
           return '<span class="ltr">' + T.summary.learnedItem(p[0], p[1], MathCore.Facts.answer(key)) + "</span>";
         }).join(", ") + "</p>"
       : "";
+    var stationHtml = (session.stationsReached || []).length
+      ? (session.stationsReached || []).map(function (n) { return '<div class="station-banner">' + T.summary.stationReached(n) + "</div>"; }).join("")
+      : "";
     var unlockHtml = session.unlocksEarned.length
       ? "<p>" + T.summary.unlockReveal + "</p><div>" + session.unlocksEarned.map(function (id) { return '<span class="sticker-reveal">' + stickerArt(id) + "</span>"; }).join(" ") + "</div>"
       : "";
@@ -1115,6 +1155,7 @@
         "<p>" + bdi(session.firstTryCorrect + "/" + session.planned.length) + "</p>" +
         '<div class="coin-pill">' + T.summary.coinsEarned(session.coinsEarned) + "</div>" +
         learnedList +
+        stationHtml +
         unlockHtml +
         '<button data-action="again">' + T.summary.nextSessionBtn + "</button> " +
         '<button class="secondary" data-action="done">' + T.summary.doneBtn + "</button>" +
@@ -1124,6 +1165,7 @@
     bindAction("done", function () { navigate("home"); });
     try {
       if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
+      else if ((session.stationsReached || []).length) { fireworksShow(); confettiBurst(40); blip(SOUNDS.unlock); }
       else if (session.unlocksEarned.length) { confettiBurst(30); blip(SOUNDS.unlock); }
       else { confettiBurst(12); }
     } catch (e) { /* decoration only */ }
@@ -1132,6 +1174,79 @@
   // ------------------------------------------------------------------
   // Screen: Collection
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // Screen: Journey map (docs/MAP-DESIGN.md)
+  // ------------------------------------------------------------------
+  var mapSelectedStation = null;
+
+  Screens.map = function () {
+    var state = S();
+    var rows = MathCore.Map.overview(state);
+    var W = 400, stepY = 78, padTop = 30, R = 24;
+    var H = padTop + stepY * rows.length + 60;
+    var pts = rows.map(function (row, i) {
+      var x = i % 2 === 0 ? 90 : 310; // zig-zag
+      var y = padTop + i * stepY + R;
+      return { x: x, y: y, row: row };
+    });
+    var castle = { x: pts[pts.length - 1].x === 90 ? 310 : 90, y: padTop + rows.length * stepY + R };
+    var path = pts.map(function (p, i) { return (i === 0 ? "M" : "L") + p.x + " " + p.y; }).join(" ") + " L" + castle.x + " " + castle.y;
+    var allDone = rows.every(function (r) { return r.reached; });
+    var nodes = pts.map(function (p) {
+      var row = p.row;
+      var fill = row.reached ? "#FFC93C" : row.current ? "#4F7CFF" : "#CBD2E0";
+      var ring = row.current ? '<circle class="map-current-ring" cx="' + p.x + '" cy="' + p.y + '" r="' + (R + 7) + '" fill="none" stroke="#4F7CFF" stroke-width="3" />' : "";
+      var star = row.reached ? '<text x="' + (p.x + R - 4) + '" y="' + (p.y - R + 6) + '" font-size="16">' + (row.progress >= row.required ? "⭐" : "☆") + "</text>" : "";
+      var turtle = row.current ? '<text class="map-turtle" x="' + (p.x + (p.x < 200 ? R + 10 : -R - 36)) + '" y="' + (p.y + 9) + '">🐢</text>' : "";
+      return (
+        '<g class="map-node" data-table="' + row.table + '" style="cursor:pointer">' + ring +
+        '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + R + '" fill="' + fill + '" />' +
+        '<text class="map-station-label" x="' + p.x + '" y="' + (p.y + 6) + '" text-anchor="middle">×' + row.table + "</text>" +
+        '<text class="map-progress-label" x="' + p.x + '" y="' + (p.y + R + 16) + '" text-anchor="middle">' + row.progress + "/" + row.required + "</text>" +
+        star + turtle + "</g>"
+      );
+    }).join("");
+    var castleNode = '<text x="' + castle.x + '" y="' + (castle.y + 12) + '" font-size="36" text-anchor="middle">' + T.map.castle + (allDone ? "👑" : "") + "</text>";
+    var svg =
+      '<svg class="map-svg" viewBox="0 0 ' + W + " " + H + '" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="' + path + '" fill="none" stroke="#E4E8F0" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />' +
+      nodes + castleNode + "</svg>";
+
+    var detail = "";
+    if (mapSelectedStation !== null) {
+      var row = rows.filter(function (r) { return r.table === mapSelectedStation; })[0];
+      var chips = MathCore.Map.tableKeys(mapSelectedStation).map(function (key) {
+        var p = MathCore.Facts.parts(key);
+        var m = MathCore.Facts.mastery(MathCore.Facts.getFact(state, key));
+        return '<span class="fact-chip ' + m + '">' + p[0] + " × " + p[1] + "</span>";
+      }).join("");
+      var status = row.reached ? T.map.reachedLabel : row.current ? T.map.currentLabel : T.map.aheadLabel;
+      detail =
+        '<div class="card">' +
+        "<h2>" + T.map.stationTitle(mapSelectedStation) + " · " + status + "</h2>" +
+        '<div class="fact-chips">' + chips + "</div>" +
+        '<div class="muted" style="margin-top:0.5rem">' + T.map.chipsLegend + "</div></div>";
+    }
+
+    render(
+      '<div class="screen" data-screen="map">' +
+        "<h1>" + T.map.title + "</h1>" +
+        (allDone ? "<p>" + T.map.doneAll + "</p>" : "") +
+        '<div class="map-wrap">' + svg + "</div>" +
+        (detail || '<div class="muted">' + T.map.tapHint + "</div>") +
+        '<button class="secondary" data-action="back">' + T.map.backBtn + "</button>" +
+        "</div>"
+    );
+    bindAction("back", function () { mapSelectedStation = null; navigate("home"); });
+    document.querySelectorAll(".map-node").forEach(function (g) {
+      g.addEventListener("click", function () {
+        var t = Number(g.getAttribute("data-table"));
+        mapSelectedStation = mapSelectedStation === t ? null : t;
+        Screens.map();
+      });
+    });
+  };
+
   Screens.collection = function () {
     var state = S();
     var totals = MathCore.Stats.totals(state, Date.now());
@@ -1603,6 +1718,7 @@
       kpiTile(T.parent.kpiCoins, totals.lifetimeCoins) +
       kpiTile(T.parent.kpiMastered, totals.masteredCount + "/55") +
       kpiTile(T.parent.kpiStreak, totals.dailyStreak) +
+      kpiTile(T.parent.kpiMap, MathCore.Map.overview(state).filter(function (r) { return r.reached; }).length + "/" + CONFIG.MAP_PATH.length) +
       kpiTile(T.parent.kpiAccuracy, overallAccuracy + "%") +
       "</div>" +
       '<div style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;margin-top:1rem">' +

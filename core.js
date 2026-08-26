@@ -66,6 +66,11 @@
     WRONG_ANSWER_DISPLAY_MS: 1800,
     WRONG_ANSWER_HELPER_MS: 3200, // a wrong answer shows the dot-array picture; needs a beat longer to absorb
     HELPER_CASCADE_MS: 1100, // the dot rows light up over this much time, whatever the row count
+
+    // Journey map (docs/MAP-DESIGN.md, Marat 2026-08-27)
+    MAP_PATH: [1, 2, 10, 5, 3, 4, 6, 7, 8, 9], // station order = learning order
+    STATION_REQUIRED: 10, // mastered facts of the table needed to reach its station
+    MAP_FOCUS_BONUS: 1.5, // added to the weakness score of the current station's facts
     ANIMATION_MAX_MS: 1800,
   };
 
@@ -321,6 +326,62 @@
     return arr;
   }
 
+  // --------------------------------------------------------------------
+  // Map — journey map by tables (docs/MAP-DESIGN.md). Pure functions.
+  // --------------------------------------------------------------------
+  var Map = {
+    // The 10 canonical facts of table n (n×1 … n×10). Facts shared with other
+    // tables (e.g. 3×4 belongs to ×3 and ×4) count for both.
+    tableKeys: function (n) {
+      var keys = [];
+      for (var i = CONFIG.FACTS_MIN; i <= CONFIG.FACTS_MAX; i++) keys.push(Facts.key(n, i));
+      return keys;
+    },
+
+    // mastered count of table n
+    progress: function (state, n) {
+      return Map.tableKeys(n).filter(function (k) {
+        return Facts.mastery(Facts.getFact(state, k)) === "mastered";
+      }).length;
+    },
+
+    isReached: function (state, n) {
+      return !!(state.map && state.map.reached && state.map.reached[n]);
+    },
+
+    // First station in path order that is not reached; null when all are.
+    currentStation: function (state) {
+      for (var i = 0; i < CONFIG.MAP_PATH.length; i++) {
+        if (!Map.isReached(state, CONFIG.MAP_PATH[i])) return CONFIG.MAP_PATH[i];
+      }
+      return null;
+    },
+
+    // Stations whose progress meets STATION_REQUIRED and are not yet reached.
+    // Does not mutate; SessionCore.finish applies it. Reaching is permanent.
+    newlyReached: function (state) {
+      return CONFIG.MAP_PATH.filter(function (n) {
+        return !Map.isReached(state, n) && Map.progress(state, n) >= CONFIG.STATION_REQUIRED;
+      });
+    },
+
+    // Full picture for the UI: one row per station in path order.
+    overview: function (state) {
+      var current = Map.currentStation(state);
+      return CONFIG.MAP_PATH.map(function (n, i) {
+        return {
+          table: n,
+          index: i,
+          progress: Map.progress(state, n),
+          required: CONFIG.STATION_REQUIRED,
+          reached: Map.isReached(state, n),
+          reachedAt: state.map && state.map.reached ? state.map.reached[n] || null : null,
+          current: n === current,
+        };
+      });
+    },
+  };
+
   var Selector = {
     // Reuses the direction of the most recent miss for this fact, if any; else random.
     chooseDirection: function (fact, key, rng) {
@@ -335,12 +396,21 @@
       return rng() < 0.5 ? a + "x" + b : b + "x" + a;
     },
 
+    // Facts of the current map station's table get a mild priority (MAP-DESIGN §2).
+    isFocusFact: function (state, key) {
+      var station = Map.currentStation(state);
+      if (station === null) return false;
+      var p = Facts.parts(key);
+      return p[0] === station || p[1] === station;
+    },
+
     weaknessScore: function (state, key, now) {
       var fact = Facts.getFact(state, key);
       var acc = fact.attempts > 0 ? fact.correct / fact.attempts : 0;
       var learning = Facts.mastery(fact) === "learning" ? 1 : 0;
       var daysSinceSeen = fact.lastSeen ? (now - fact.lastSeen) / (1000 * 60 * 60 * 24) : 0;
-      return (1 - acc) * 2 + learning + daysSinceSeen / 7;
+      var focus = Selector.isFocusFact(state, key) ? CONFIG.MAP_FOCUS_BONUS : 0;
+      return (1 - acc) * 2 + learning + daysSinceSeen / 7 + focus;
     },
 
     // Pure: does not mutate `state`. Returns an array of directional strings
@@ -668,6 +738,11 @@
       var unlocksEarned = Economy.newUnlocks(state);
       state.economy.unlocked = (state.economy.unlocked || []).concat(unlocksEarned);
 
+      // Journey map: stations reached in this session are permanent (never fall).
+      if (!state.map) state.map = { reached: {} };
+      var stationsReached = Map.newlyReached(state);
+      stationsReached.forEach(function (n) { state.map.reached[n] = now; });
+
       var masteredAfter = Facts.allKeys().filter(function (k) {
         return Facts.mastery(Facts.getFact(state, k)) === "mastered";
       }).length;
@@ -694,6 +769,7 @@
         perfect: perfect,
         masteredAfter: masteredAfter,
         unlocksEarned: unlocksEarned,
+        stationsReached: stationsReached,
       };
 
       state.sessions.push(session);
@@ -868,6 +944,7 @@
         sessions: [],
         carryover: [],
         active: null,
+        map: { reached: {} },
       };
     },
 
@@ -909,6 +986,8 @@
         sessions: Array.isArray(raw.sessions) ? JSON.parse(JSON.stringify(raw.sessions)) : [],
         carryover: Array.isArray(raw.carryover) ? raw.carryover.slice() : [],
         active: raw.active ? JSON.parse(JSON.stringify(raw.active)) : null,
+        // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
+        map: { reached: raw.map && raw.map.reached && typeof raw.map.reached === "object" ? JSON.parse(JSON.stringify(raw.map.reached)) : {} },
       };
       // Any resumed session (fresh boot or import onto another device) counts
       // as a lifecycle interruption (DESIGN §6/§7, R2 #5, R3 #2).
@@ -1011,6 +1090,16 @@
       }
       if (raw.carryover !== undefined && !Array.isArray(raw.carryover)) {
         problems.push("carryover must be an array");
+      }
+      if (raw.map !== undefined) {
+        if (!raw.map || typeof raw.map !== "object" || Array.isArray(raw.map)) problems.push("map must be an object");
+        else if (raw.map.reached !== undefined) {
+          if (!raw.map.reached || typeof raw.map.reached !== "object" || Array.isArray(raw.map.reached)) problems.push("map.reached must be an object");
+          else Object.keys(raw.map.reached).forEach(function (k) {
+            var n = Number(k);
+            if (!(n >= CONFIG.FACTS_MIN && n <= CONFIG.FACTS_MAX) || typeof raw.map.reached[k] !== "number") problems.push("map.reached[" + k + "] invalid");
+          });
+        }
       }
       if (raw.active !== undefined && raw.active !== null) {
         if (typeof raw.active !== "object" || Array.isArray(raw.active)) {
@@ -1392,6 +1481,7 @@
     Facts: Facts,
     Economy: Economy,
     Selector: Selector,
+    Map: Map,
     SessionCore: SessionCore,
     Storage: Storage,
     Pin: Pin,
