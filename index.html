@@ -176,7 +176,7 @@
       parentBtn: "הורים",
       installBanner: "כדי להתקין: לחצי על שיתוף ⬆️ ואז \"הוספה למסך הבית\"",
       backupBanner: "לא גיבינו לאחרונה — כדאי לבקש מההורים לגבות",
-      streakLabel: function (n) { return "רצף של " + n + " ימים 🔥"; },
+      streakLabel: function (n) { return "רצף של " + bdi(n) + " ימים 🔥"; },
     },
 
     parentSetup: {
@@ -196,7 +196,7 @@
     },
 
     question: {
-      equalsCoin: function (n) { return "שווה " + n + " 🪙"; },
+      equalsCoin: function (n) { return "שווה " + bdi(n) + " 🪙"; },
       check: "✓",
       clear: "⌫",
       showKeyboard: "הצג מקלדת",
@@ -220,13 +220,13 @@
       unlockReveal: "פתחת מדבקה חדשה!",
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
-      coinsEarned: function (n) { return "+" + n + " 🪙"; },
+      coinsEarned: function (n) { return bdi("+" + n) + " 🪙"; },
     },
 
     collection: {
       title: "האוסף שלי",
       backBtn: "חזרה",
-      nextUnlockProgress: function (remaining) { return "עוד " + remaining + " מטבעות למדבקה הבאה"; },
+      nextUnlockProgress: function (remaining) { return "עוד " + bdi(remaining) + " מטבעות למדבקה הבאה"; },
       allUnlocked: "אספת את כל המדבקות! 🏆",
     },
 
@@ -369,6 +369,14 @@
     return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  // Isolates a number (optionally with a sign/prefix like "+21") from the
+  // surrounding RTL bidi context (I10) — without this, "+21" can visually
+  // reorder to "21+" inside RTL text (confirmed live: the summary screen's
+  // coin badge). Wrap every interpolated number, not just equations.
+  function bdi(content) {
+    return "<bdi>" + content + "</bdi>";
   }
 
   function isCoarsePointer() {
@@ -528,7 +536,7 @@
     render(
       '<div class="screen" data-screen="home">' +
         "<h1>" + T.appTitle + "</h1>" +
-        '<div class="coin-pill">🪙 ' + totals.lifetimeCoins + "</div>" +
+        '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<button data-action="play">' + (hasActive ? T.home.resumeCta : T.home.startCta) + "</button>" +
         '<div><button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
@@ -773,7 +781,7 @@
     }
     if (result.ok && result.coins > 0) {
       var pill = document.querySelector(".coin-pill");
-      if (pill) pill.textContent = "+" + result.coins + " 🪙";
+      if (pill) pill.innerHTML = bdi("+" + Number(result.coins)) + " 🪙"; // result.coins is always our own number, never user input
     }
     setTimeout(function () {
       App.feedbackLock = false;
@@ -856,7 +864,7 @@
       '<div class="screen" data-screen="summary">' +
         '<div class="stars">' + "⭐".repeat(stars) + "</div>" +
         titleHtml +
-        "<p>" + session.firstTryCorrect + "/" + session.planned.length + "</p>" +
+        "<p>" + bdi(session.firstTryCorrect + "/" + session.planned.length) + "</p>" +
         '<div class="coin-pill">' + T.summary.coinsEarned(session.coinsEarned) + "</div>" +
         learnedList +
         unlockHtml +
@@ -927,7 +935,7 @@
     render(
       '<div class="screen" data-screen="rewards">' +
         "<h1>" + T.rewards.title + "</h1>" +
-        '<div class="coin-pill">🪙 ' + totals.balance + "</div>" +
+        '<div class="coin-pill">🪙 ' + bdi(totals.balance) + "</div>" +
         itemsHtml +
         '<button class="secondary" data-action="back">' + T.rewards.backBtn + "</button>" +
         "</div>"
@@ -1298,7 +1306,7 @@
         ? historyRows
             .map(function (sess) {
               var dateStr = new Date(sess.endedAt).toLocaleDateString("he-IL");
-              return '<div class="reward-item"><span>' + dateStr + " — " + sess.firstTryCorrect + "/" + sess.planned.length + "</span><span>" + sess.coinsEarned + " 🪙</span></div>";
+              return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
             })
             .join("")
         : '<p class="muted">אין עדיין סבבים</p>');
