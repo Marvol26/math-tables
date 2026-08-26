@@ -1,6 +1,6 @@
 # לוח הכפל
 
-משחק לתרגול לוח הכפל (1×1 עד 10×10) בעברית, לילדה בת 8. תשובות מוקלדות, בלי רמזים, מטבעות על כל שאלה, אוסף מדבקות, פרסים אמיתיים שההורים מגדירים, ומצב אתגר עם שעון (אופציונלי, לעולם לא מעניש). מסך הורים נעול בקוד עם סטטיסטיקות, ניהול פרסים וגיבוי.
+משחק לתרגול לוח הכפל (1×1 עד 10×10) בעברית, לילדה בת 8. תשובות מוקלדות, בלי רמזים, מטבעות על כל שאלה, אוסף מדבקות, פרסים אמיתיים שההורים מגדירים, מצב אתגר עם צב שהולך לדגל (אופציונלי, לעולם לא מעניש), ציור של נקודות אחרי טעות, ומפת מסע עם 10 תחנות — תחנה לכל לוח (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×7 → ×8 → ×9) שנדלקת כשכל 10 התרגילים שלה נלמדו לגמרי; תחנה שהושגה לא נכבית. מסך הורים נעול בקוד עם סטטיסטיקות, ניהול פרסים וגיבוי.
 
 🔗 **המשחק חי כאן:** https://marvol26.github.io/math-tables/
 
@@ -42,7 +42,7 @@ python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפ
 
 # Math Tables (לוח הכפל)
 
-A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, and an optional never-punishing Challenge Mode timer. A PIN-locked parent view has stats, a rewards editor, and backup tools.
+A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×7 → ×8 → ×9) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
 
 🔗 **Live at:** https://marvol26.github.io/math-tables/
 
