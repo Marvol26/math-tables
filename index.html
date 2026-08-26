@@ -79,8 +79,24 @@
   .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; width: min(320px, 90vw); }
   .numpad button { min-height: 56px; min-width: 56px; font-size: 1.4rem; background: var(--card-bg); color: var(--text); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
   .numpad button.check { background: var(--correct); color: #fff; }
-  .challenge-bar-track { width: min(320px, 90vw); height: 10px; background: #E4E8F0; border-radius: 999px; overflow: hidden; }
-  .challenge-bar-fill { height: 100%; background: var(--primary); transition: width 0.1s linear; }
+  /* Challenge Mode "turtle walk" (2026-08-27): time passing as a small story, not a countdown */
+  .turtle-track { position: relative; width: min(320px, 90vw); height: 44px; direction: ltr; unicode-bidi: isolate; }
+  .turtle-path { position: absolute; left: 12px; right: 12px; bottom: 8px; height: 6px; border-radius: 999px; background: #E4E8F0; }
+  .turtle-flag { position: absolute; right: 0; bottom: 6px; font-size: 1.4rem; }
+  .turtle { position: absolute; left: 0; bottom: 6px; font-size: 1.7rem; transition: left 0.12s linear; animation: turtle-bob 0.6s ease-in-out infinite; will-change: left; }
+  .turtle.resting { animation: none; }
+  .turtle.hopping { animation: turtle-hop 0.5s ease-out 2; }
+  @keyframes turtle-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-3px) rotate(3deg); } }
+  @keyframes turtle-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-16px); } }
+  .turtle-zzz { position: absolute; bottom: 30px; font-size: 1rem; animation: zzz-float 1.6s ease-in-out infinite; }
+  @keyframes zzz-float { 0% { transform: translateY(0); opacity: 0.6; } 100% { transform: translateY(-10px); opacity: 1; } }
+  /* Wrong-answer helper: the fact as rows of dots */
+  .dot-array { display: grid; gap: 4px; direction: ltr; justify-content: center; margin: 0.4rem auto 0; }
+  .dot-array span { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); opacity: 0; animation: dot-in 0.25s ease forwards; }
+  @keyframes dot-in { to { opacity: 1; transform: scale(1); } }
+  .dot-array-caption { font-weight: bold; color: var(--text); }
+  .chart-value { font: 10px sans-serif; fill: #2B2D42; }
+  .chart-axis { font: 9px sans-serif; fill: #8D99AE; }
   .feedback-correct .equation { animation: flash-green 0.5s ease; }
   .feedback-wrong .equation { animation: shake 0.5s ease; }
   @keyframes flash-green { 0%, 100% { color: var(--text); } 30% { color: var(--correct); } }
@@ -105,7 +121,8 @@
   .reward-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(420px, 92vw); }
   .banner { position: fixed; left: 0; right: 0; text-align: center; padding: 0.6rem 1rem; z-index: 800; }
   @media (prefers-reduced-motion: reduce) {
-    .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect { animation: none; }
+    .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect, .turtle, .turtle-zzz { animation: none; }
+    .dot-array span { animation: none; opacity: 1; }
     .confetti-layer, .fireworks { display: none; }
   }
   @media (max-height: 600px) {
@@ -127,7 +144,7 @@
     [data-screen="question"] .numpad { width: min(260px, 38vw); gap: 0.3rem; }
     [data-screen="question"] .numpad button { min-height: 44px; min-width: 44px; font-size: 1.1rem; }
     [data-screen="question"] .coin-pill { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
-    [data-screen="question"] .challenge-bar-track { width: min(260px, 38vw); }
+    [data-screen="question"] .turtle-track { width: min(260px, 38vw); height: 36px; }
   }
   #stale-card {
     display: none;
@@ -220,7 +237,9 @@
       exitConfirmTitle: "יוצאות? נמשיך אחר כך מאותו מקום",
       exitConfirmYes: "כן, יוצאות",
       exitConfirmNo: "לא, ממשיכות",
-      timeoutMessage: "אפשר לאט 🙂",
+      timeoutMessage: "הצב הגיע ונח 😴 — אפשר לאט 🙂",
+      helperCaption: function (a, b, product) { return a + " × " + b + " = " + product; },
+      helperRows: function (a, b) { return bdi(a) + " שורות של " + bdi(b); },
       interruptedLabel: "ממשיכות בלי שעון",
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
@@ -431,7 +450,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.4.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.5.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -808,7 +827,7 @@
         '<div class="dots">' + dotsHtml + "</div>" +
         '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
         (current.interrupted ? '<div class="muted">' + T.question.interruptedLabel + "</div>" :
-          challengeOn ? '<div class="challenge-bar-track"><div class="challenge-bar-fill" id="challenge-fill" style="width:100%"></div></div>' : "") +
+          challengeOn ? '<div class="turtle-track" id="turtle-track"><div class="turtle-path"></div><span class="turtle-flag">🏁</span><span class="turtle" id="turtle">🐢</span></div>' : "") +
         '<div class="coin-pill">' + T.question.equalsCoin(value) + "</div>" +
         '<div class="equation ltr" id="equation">' +
         "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span><span>=</span>" +
@@ -885,12 +904,16 @@
   var challengeTimerHandle = null;
   function startChallengeTimer(limitSec) {
     var startedAt = performance.now();
-    var fill = document.getElementById("challenge-fill");
+    var turtle = document.getElementById("turtle");
+    var track = document.getElementById("turtle-track");
     clearInterval(challengeTimerHandle);
     challengeTimerHandle = setInterval(function () {
       var elapsed = (performance.now() - startedAt) / 1000;
-      var pct = Math.max(0, 1 - elapsed / limitSec);
-      if (fill) fill.style.width = (pct * 100) + "%";
+      var pct = Math.min(1, elapsed / limitSec);
+      if (turtle && track) {
+        var travel = track.clientWidth - turtle.offsetWidth - 28; // stop just before the flag
+        turtle.style.left = Math.max(0, pct * travel) + "px";
+      }
       if (elapsed >= limitSec) {
         clearInterval(challengeTimerHandle);
         onTimeout();
@@ -898,6 +921,8 @@
     }, 100);
   }
 
+  // The turtle reached the flag: it sits down and naps. Nothing is lost —
+  // the question stays open (D8) and a correct answer still pays base coins.
   function onTimeout() {
     var el = document.getElementById("equation");
     if (el) {
@@ -906,9 +931,34 @@
       msg.textContent = T.question.timeoutMessage;
       el.parentNode.insertBefore(msg, el.nextSibling);
     }
-    // Challenge bar hides; question stays open (D8) — no submission happens here.
-    var track = document.querySelector(".challenge-bar-track");
-    if (track) track.style.display = "none";
+    var turtle = document.getElementById("turtle");
+    if (turtle) {
+      turtle.classList.add("resting");
+      var zzz = document.createElement("span");
+      zzz.className = "turtle-zzz";
+      zzz.textContent = "💤";
+      zzz.style.left = (turtle.offsetLeft + 18) + "px";
+      turtle.parentNode.appendChild(zzz);
+    }
+  }
+
+  // Wrong-answer helper: the fact as `a` rows of `b` dots, lighting up row by
+  // row, captioned "a × b = product". Shown only AFTER a wrong answer (D3: no
+  // clues while answering) — it explains, it never hints.
+  function dotArrayHtml(asked) {
+    var p = MathCore.Facts.parts(asked);
+    var rows = p[0], cols = p[1];
+    var cells = "";
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        cells += '<span style="animation-delay:' + (r * 220 + c * 25) + 'ms"></span>';
+      }
+    }
+    return (
+      '<div class="dot-array" style="grid-template-columns:repeat(' + cols + ',12px)">' + cells + "</div>" +
+      '<div class="muted">' + T.question.helperRows(rows, cols) + "</div>" +
+      '<div class="dot-array-caption ltr">' + T.question.helperCaption(rows, cols, rows * cols) + "</div>"
+    );
   }
 
   function submitAnswer() {
@@ -936,8 +986,8 @@
     var equation = document.getElementById("equation");
     var note = document.createElement("div");
     if (!result.ok) {
-      note.className = "muted";
-      note.textContent = T.question.wrongAnswerWas(result.correctAnswer);
+      note.className = "wrong-helper";
+      note.innerHTML = dotArrayHtml(result.asked); // numbers only — built from the fact, never from input
     } else if (fast) {
       note.className = "fast-badge"; // P3: "something nice" for beating the clock
       note.textContent = T.question.beatClock;
@@ -946,6 +996,10 @@
       note.textContent = T.question.retryNowYouKnow; // P1: a correct retry gets its line
     }
     if (equation && note.textContent) equation.parentNode.insertBefore(note, equation.nextSibling);
+    if (fast) {
+      var t = document.getElementById("turtle");
+      if (t) { t.textContent = "🐇"; t.classList.add("hopping"); t.classList.remove("resting"); }
+    }
     if (result.ok && result.coins > 0) {
       var pill = document.querySelector(".coin-pill");
       if (pill) pill.innerHTML = bdi("+" + Number(result.coins)) + " 🪙"; // result.coins is always our own number, never user input
@@ -965,7 +1019,7 @@
       } else {
         paintNextQuestion();
       }
-    }, CONFIG.WRONG_ANSWER_DISPLAY_MS);
+    }, result.ok ? CONFIG.WRONG_ANSWER_DISPLAY_MS : CONFIG.WRONG_ANSWER_HELPER_MS);
   }
 
   function finishSession() {
@@ -1420,29 +1474,52 @@
   }
 
   // Inline SVG line chart with a <title> tooltip per point (DESIGN §9.6).
+  // Line chart with readable numbers: y-axis min/max, a value label on every
+  // point (last 12; older points keep the tooltip), a final-value badge and
+  // "סבב N" labels under the first/last point. opts.fmt formats a value for
+  // display; opts.format builds the tooltip.
   function lineChartSvg(values, opts) {
-    var w = 220, h = 70, pad = 6;
+    var w = 320, h = 120, padL = 34, padR = 30, padT = 16, padB = 18;
     if (!values.length) return '<svg width="' + w + '" height="' + h + '"></svg>';
+    var fmt = opts.fmt || function (v) { return String(Math.round(v)); };
     var max = Math.max.apply(null, values.concat([0]));
     var min = Math.min.apply(null, values.concat([0]));
     if (max === min) max = min + 1;
-    var stepX = values.length > 1 ? (w - 2 * pad) / (values.length - 1) : 0;
+    var innerW = w - padL - padR, innerH = h - padT - padB;
+    var stepX = values.length > 1 ? innerW / (values.length - 1) : 0;
     var points = values.map(function (v, i) {
-      var x = pad + i * stepX;
-      var y = h - pad - ((v - min) / (max - min)) * (h - 2 * pad);
+      var x = padL + i * stepX;
+      var y = padT + innerH - ((v - min) / (max - min)) * innerH;
       return { x: x, y: y, v: v };
     });
     var polyline = points.map(function (p) { return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" ");
+    var labelFrom = Math.max(0, values.length - 12);
     var circles = points
       .map(function (p, i) {
         var titleText = opts.format ? opts.format(p.v, i) : String(p.v);
-        return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="#4F7CFF"><title>' + escapeHtml(titleText) + "</title></circle>";
+        var label = i >= labelFrom && i !== values.length - 1
+          ? '<text class="chart-value" x="' + p.x.toFixed(1) + '" y="' + (p.y - 6).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(p.v)) + "</text>"
+          : "";
+        return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3" fill="#4F7CFF"><title>' + escapeHtml(titleText) + "</title></circle>" + label;
       })
       .join("");
+    var last = points[points.length - 1];
+    var lastBadge =
+      '<rect x="' + (last.x + 6).toFixed(1) + '" y="' + (last.y - 9).toFixed(1) + '" width="26" height="16" rx="8" fill="#FFC93C" />' +
+      '<text class="chart-value" x="' + (last.x + 19).toFixed(1) + '" y="' + (last.y + 3).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(last.v)) + "</text>";
+    var grid =
+      '<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + padT + '" y2="' + padT + '" stroke="#E4E8F0" />' +
+      '<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + (padT + innerH / 2) + '" y2="' + (padT + innerH / 2) + '" stroke="#E4E8F0" stroke-dasharray="3 3" />' +
+      '<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + (padT + innerH) + '" y2="' + (padT + innerH) + '" stroke="#E4E8F0" />' +
+      '<text class="chart-axis" x="' + (padL - 4) + '" y="' + (padT + 3) + '" text-anchor="end">' + escapeHtml(fmt(max)) + "</text>" +
+      '<text class="chart-axis" x="' + (padL - 4) + '" y="' + (padT + innerH + 3) + '" text-anchor="end">' + escapeHtml(fmt(min)) + "</text>" +
+      '<text class="chart-axis" x="' + padL + '" y="' + (h - 4) + '" text-anchor="start">' + escapeHtml(T.parent.sessionLabel(1)) + "</text>" +
+      (values.length > 1 ? '<text class="chart-axis" x="' + (w - padR) + '" y="' + (h - 4) + '" text-anchor="end">' + escapeHtml(T.parent.sessionLabel(values.length)) + "</text>" : "");
     return (
-      '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + " " + h + '">' +
+      '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + " " + h + '" style="max-width:100%">' +
+      grid +
       '<polyline points="' + polyline + '" fill="none" stroke="#4F7CFF" stroke-width="2" />' +
-      circles +
+      circles + lastBadge +
       "</svg>"
     );
   }
@@ -1456,8 +1533,8 @@
     var overallAccuracy = totalAttempts ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
     var trends = MathCore.Stats.trends(state, 30);
-    var chart1 = lineChartSvg(trends.accuracy.map(function (v) { return v * 100; }), { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + Math.round(v) + "%"; } });
-    var chart2 = lineChartSvg(trends.avgMs.map(function (v) { return v / 1000; }), { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v.toFixed(1) + "s"; } });
+    var chart1 = lineChartSvg(trends.accuracy.map(function (v) { return v * 100; }), { fmt: function (v) { return Math.round(v) + "%"; }, format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + Math.round(v) + "%"; } });
+    var chart2 = lineChartSvg(trends.avgMs.map(function (v) { return v / 1000; }), { fmt: function (v) { return v.toFixed(1); }, format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v.toFixed(1) + "s"; } });
     var chart3 = lineChartSvg(trends.masteredCount, { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v; } });
     var chart4 = lineChartSvg(trends.coins, { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v + " 🪙"; } });
 

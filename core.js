@@ -64,6 +64,7 @@
 
     // UI timing (shared so no number lives outside CONFIG — I7)
     WRONG_ANSWER_DISPLAY_MS: 1800,
+    WRONG_ANSWER_HELPER_MS: 3200, // a wrong answer shows the dot-array picture; needs a beat longer to absorb
     ANIMATION_MAX_MS: 1800,
   };
 
@@ -565,6 +566,7 @@
         ok: ok,
         coins: attemptRecord.coins,
         correctAnswer: Facts.answer(current.asked),
+        asked: current.asked,
         interrupted: attemptRecord.interrupted,
         retry: attemptRecord.retry,
         withinLimit: attemptRecord.withinLimit,

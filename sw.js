@@ -3,7 +3,7 @@
 // both busts the cache and drives the "update available" toast (DESIGN §11).
 "use strict";
 
-var VERSION = "v5";
+var VERSION = "v6";
 var CACHE_NAME = "mathtrainer-" + VERSION;
 var PRECACHE_URLS = ["./", "index.html", "core.js", "manifest.webmanifest", "icon-180.png", "icon-512.png"];
 

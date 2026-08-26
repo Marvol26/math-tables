@@ -315,6 +315,7 @@ test("[review] submit result carries withinLimit and retry flags", () => {
   const asked = state.active.current.asked;
   const fast = SessionCore.submit(state, Facts.answer(asked), 3000, {});
   assert.equal(fast.ok, true);
+  assert.equal(fast.asked, asked, "submit result names the fact asked (used by the wrong-answer helper)");
   assert.equal(fast.withinLimit, true);
   assert.equal(fast.retry, false);
   SessionCore.paint(state, 4000);
