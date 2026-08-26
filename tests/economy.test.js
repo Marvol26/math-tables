@@ -138,3 +138,15 @@ test("[WP1-gate minor] approveRequest never marks a request approved if the ledg
   assert.equal(state.economy.requests[0].status, "requested"); // not silently approved
   assert.equal(state.economy.ledger.filter((e) => e.type === "redeem").length, 0);
 });
+
+// --- Punch-list P11 (2026-08-26): double-tap guard ---
+test("[P11] requestReward refuses a second pending request for the same reward", () => {
+  const state = require("../core.js").Migrate.emptyState(0);
+  state.economy.rewards.push({ id: "r1", name: "x", cost: 10, active: true });
+  assert.equal(Economy.requestReward(state, "r1", "q1", 1).ok, true);
+  const second = Economy.requestReward(state, "r1", "q2", 2);
+  assert.equal(second.ok, false);
+  assert.equal(state.economy.requests.length, 1);
+  state.economy.requests[0].status = "rejected";
+  assert.equal(Economy.requestReward(state, "r1", "q3", 3).ok, true, "a new request is allowed once the old one is processed");
+});

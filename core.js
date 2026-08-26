@@ -22,6 +22,11 @@
 
     // Economy
     TIER_VALUE: { 1: 1, 2: 2, 3: 3 }, // tier index -> coin value
+    // Which operand decides the tier: "max" (DESIGN v4 rule: 1x6 pays like 6x6)
+    // or "min" (1x6 pays 1, 6x7 pays 3). Changing this reprices the live
+    // economy — Marat's call (punch-list P6, 2026-08-26).
+    TIER_BY: "max",
+    LEDGER_MAX_ABS_AMOUNT: 10000, // import validation bound (P10)
     MASTERED_VALUE: 1,
     WITHIN_LIMIT_MULTIPLIER: 2,
     RETRY_VALUE: 0,
@@ -95,7 +100,7 @@
 
     tier: function (key) {
       var p = Facts.parts(key);
-      var m = Math.max(p[0], p[1]);
+      var m = CONFIG.TIER_BY === "min" ? Math.min(p[0], p[1]) : Math.max(p[0], p[1]);
       if (m === 1 || m === 2 || m === 10) return 1;
       if (m === 3 || m === 4 || m === 5) return 2;
       return 3; // 6,7,8,9
@@ -237,6 +242,10 @@
         return r.id === rewardId && r.active;
       });
       if (!reward) return { ok: false, reason: "reward not found or inactive" };
+      var pending = state.economy.requests.some(function (r) {
+        return r.rewardId === rewardId && r.status === "requested";
+      });
+      if (pending) return { ok: false, reason: "already requested" }; // P11: double-tap guard
       var request = {
         id: id,
         rewardId: rewardId,
@@ -938,6 +947,7 @@
             if (typeof entry.t !== "number") problems.push("ledger[" + i + "].t must be a number");
             if (["earn", "redeem", "adjust"].indexOf(entry.type) === -1) problems.push("ledger[" + i + "].type must be earn/redeem/adjust");
             if (typeof entry.amount !== "number") problems.push("ledger[" + i + "].amount must be a number");
+            else if (!isFinite(entry.amount) || Math.abs(entry.amount) > CONFIG.LEDGER_MAX_ABS_AMOUNT) problems.push("ledger[" + i + "].amount out of range");
           });
         }
       }
@@ -988,6 +998,15 @@
           if (!Array.isArray(a.retryQueue)) problems.push("active.retryQueue must be an array");
           if (!Array.isArray(a.attempts)) problems.push("active.attempts must be an array");
           if (typeof a.id !== "string" || !a.id) problems.push("active.id must be a non-empty string");
+          if (a.current !== undefined && a.current !== null) {
+            var c = a.current;
+            if (typeof c !== "object" || Array.isArray(c)) problems.push("active.current must be an object or null");
+            else {
+              if (typeof c.asked !== "string" || !/^\d+x\d+$/.test(c.asked)) problems.push("active.current.asked must be like \"7x2\"");
+              if (typeof c.key !== "string" || !/^\d+x\d+$/.test(c.key)) problems.push("active.current.key must be like \"2x7\"");
+              if (typeof c.shownAt !== "number") problems.push("active.current.shownAt must be a number");
+            }
+          }
         }
       }
       return { ok: problems.length === 0, problems: problems };

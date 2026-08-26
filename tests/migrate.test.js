@@ -152,3 +152,30 @@ test("[WP3 regression] migrate() preserves settings.forceNumpad across a reload 
   const rawAbsent = sampleRaw();
   assert.equal(Migrate.migrate(rawAbsent).settings.forceNumpad, null);
 });
+
+// --- Punch-list P10 (2026-08-26): deeper import validation ---
+test("[P10] validateImport rejects active.current without asked/key/shownAt", () => {
+  const raw = Migrate.emptyState(0);
+  raw.active = { id: "s_1", planned: ["2x3"], queue: [], retryQueue: [], attempts: [], current: {} };
+  const v = Migrate.validateImport(raw);
+  assert.equal(v.ok, false);
+  assert.ok(v.problems.some((p) => /active\.current\.asked/.test(p)));
+});
+
+test("[P10] validateImport accepts a well-formed active.current and null current", () => {
+  const raw = Migrate.emptyState(0);
+  raw.active = { id: "s_1", planned: ["2x3"], queue: [], retryQueue: [], attempts: [], current: { asked: "3x2", key: "2x3", shownAt: 5, retry: false, interrupted: false } };
+  assert.equal(Migrate.validateImport(raw).ok, true);
+  raw.active.current = null;
+  assert.equal(Migrate.validateImport(raw).ok, true);
+});
+
+test("[P10] validateImport rejects a ledger amount outside ±LEDGER_MAX_ABS_AMOUNT", () => {
+  const raw = Migrate.emptyState(0);
+  raw.economy.ledger = [{ id: "l_x", t: 1, type: "earn", amount: 999999 }];
+  const v = Migrate.validateImport(raw);
+  assert.equal(v.ok, false);
+  assert.ok(v.problems.some((p) => /out of range/.test(p)));
+  raw.economy.ledger = [{ id: "l_x", t: 1, type: "earn", amount: 31 }];
+  assert.equal(Migrate.validateImport(raw).ok, true);
+});
