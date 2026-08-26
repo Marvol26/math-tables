@@ -573,11 +573,30 @@
     paintNextQuestion();
   };
 
+  // requestAnimationFrame alone never fires while the document is hidden
+  // (backgrounded tab / momentarily unfocused) — confirmed live: a bare
+  // rAF() left the app permanently stuck on a stale screen with the correct
+  // hash but no re-render, no error, no way forward. Race it against a
+  // short timeout so painting the next question — a correctness-critical
+  // operation, not just an animation — always eventually happens; rAF still
+  // wins (and keeps the "capture shownAt after an actual paint" precision
+  // DESIGN §7 wants) in the overwhelmingly common foreground case.
+  function nextFrame(callback) {
+    var fired = false;
+    function fire() {
+      if (fired) return;
+      fired = true;
+      callback();
+    }
+    requestAnimationFrame(fire);
+    setTimeout(fire, 50);
+  }
+
   function paintNextQuestion() {
     var state = S();
     if (!state.active) { navigate("home"); return; }
     if (state.active.current) { renderQuestion(); return; }
-    requestAnimationFrame(function () {
+    nextFrame(function () {
       var paintedResult = null;
       save(function (s) { paintedResult = MathCore.SessionCore.paint(s, Date.now()); }).then(function (result) {
         if (!result.ok) return; // stale/error already surfaced via banner/stale card
