@@ -303,3 +303,31 @@ test("[WP1-gate test-gap] the perfect bonus is awarded only once per calendar da
   const perfectEntries = state.economy.ledger.filter((e) => e.id.endsWith("_perfect"));
   assert.equal(perfectEntries.length, 1);
 });
+
+// --- Closing review 2026-08-26: submit() exposes retry/withinLimit for the UI ---
+test("[review] submit result carries withinLimit and retry flags", () => {
+  const { Migrate, SessionCore, Facts } = require("../core.js");
+  const state = Migrate.emptyState(0);
+  state.settings.challengeOn = true;
+  state.settings.timeLimitSec = 10;
+  SessionCore.start(state, () => 0.5, 1000);
+  SessionCore.paint(state, 1000);
+  const asked = state.active.current.asked;
+  const fast = SessionCore.submit(state, Facts.answer(asked), 3000, {});
+  assert.equal(fast.ok, true);
+  assert.equal(fast.withinLimit, true);
+  assert.equal(fast.retry, false);
+  SessionCore.paint(state, 4000);
+  const wrong = SessionCore.submit(state, -1, 5000, {});
+  assert.equal(wrong.ok, false);
+  // drain the queue correctly, then the retry comes back
+  while (state.active.queue.length > 0) {
+    SessionCore.paint(state, 6000);
+    SessionCore.submit(state, Facts.answer(state.active.current.asked), 6500, {});
+  }
+  SessionCore.paint(state, 7000);
+  assert.equal(state.active.current.retry, true);
+  const retryResult = SessionCore.submit(state, Facts.answer(state.active.current.asked), 7500, {});
+  assert.equal(retryResult.ok, true);
+  assert.equal(retryResult.retry, true);
+});

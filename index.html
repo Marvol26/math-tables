@@ -340,7 +340,7 @@
       sessionLabel: function (i) { return "סבב " + i; },
       importSummary: function (sessions, coins, date) { return bdi(sessions) + " סבבים, " + bdi(coins) + " מטבעות, ייצוא מ-" + bdi(date); },
       masteryNames: { new: "חדש", learning: "בלמידה", mastered: "נלמד לגמרי" },
-      heatmapTooltip: function (a, b, masteryName) { return a + " × " + b + " — " + masteryName; },
+      heatmapTooltip: function (a, b, masteryName) { return masteryName + ": " + a + "\u00d7" + b; },
     },
 
     misc: {
@@ -690,8 +690,8 @@
     if (ev.key !== "Enter" || ev.repeat) return;
     if (currentHashScreen() !== "home") return;
     var tag = document.activeElement && document.activeElement.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA") return;
-    if (!S() || !S().settings.pinHash) return;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return; // a focused button handles Enter itself
+    if (!App.storage || !App.storage.state || !App.storage.state.settings.pinHash) return;
     startOrResumeSession();
   });
 
@@ -927,6 +927,7 @@
 
   function showFeedback(result) {
     var screenEl = document.querySelector('[data-screen="question"]');
+    if (!screenEl) return; // the child left mid-save; route() already cleared the lock
     var fast = result.ok && result.withinLimit && !result.retry;
     if (screenEl) {
       screenEl.classList.add(result.ok ? "feedback-correct" : "feedback-wrong");
@@ -1033,7 +1034,7 @@
     var learnedList = session.misses.length
       ? "<p>" + T.summary.learnedToday + ": " + session.misses.map(function (key) {
           var p = MathCore.Facts.parts(key); // P5: canonical key -> "a × b = product"
-          return bdi(T.summary.learnedItem(p[0], p[1], MathCore.Facts.answer(key)));
+          return '<span class="ltr">' + T.summary.learnedItem(p[0], p[1], MathCore.Facts.answer(key)) + "</span>";
         }).join(", ") + "</p>"
       : "";
     var unlockHtml = session.unlocksEarned.length
@@ -1335,7 +1336,7 @@
       ? pending
           .map(function (req) {
             return (
-              '<div class="reward-item"><span>' + escapeHtml(req.nameSnapshot) + " — " + req.costSnapshot + " 🪙</span>" +
+              '<div class="reward-item"><span>' + escapeHtml(req.nameSnapshot) + " — " + Number(req.costSnapshot) + " 🪙</span>" +
               '<span><button data-approve-request="' + req.id + '">' + T.parent.approveBtn + "</button> " +
               '<button class="secondary" data-reject-request="' + req.id + '">' + T.parent.rejectBtn + "</button></span></div>"
             );
@@ -1349,7 +1350,7 @@
       rewardsHtml +
       '<div style="margin-top:0.75rem">' +
       '<input id="new-reward-name" type="text" placeholder="' + T.parent.rewardNamePlaceholder + '" /> ' +
-      '<input id="new-reward-cost" type="number" min="1" placeholder="' + T.parent.rewardCostPlaceholder + '" style="width:6em" /> ' +
+      '<input id="new-reward-cost" type="number" min="1" max="' + CONFIG.LEDGER_MAX_ABS_AMOUNT + '" placeholder="' + T.parent.rewardCostPlaceholder + '" style="width:6em" /> ' +
       '<button data-action="add-reward">' + T.parent.addRewardBtn + "</button>" +
       "</div>" +
       "<h2>" + T.parent.pendingRequestsTitle + "</h2>" +
@@ -1363,7 +1364,8 @@
     bindAction("add-reward", function () {
       var name = document.getElementById("new-reward-name").value.trim();
       var cost = Number(document.getElementById("new-reward-cost").value);
-      if (!name || !cost || cost <= 0) return;
+      if (!name || !isFinite(cost) || cost <= 0 || cost > CONFIG.LEDGER_MAX_ABS_AMOUNT) return;
+      cost = Math.round(cost);
       var id = "r_" + Date.now() + "_" + Math.floor(Math.random() * 1e6);
       save(function (s) { s.economy.rewards.push({ id: id, name: name, cost: cost, active: true }); }).then(function (result) {
         if (result.ok) renderParentDashboard();

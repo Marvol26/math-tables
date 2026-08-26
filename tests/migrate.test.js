@@ -179,3 +179,25 @@ test("[P10] validateImport rejects a ledger amount outside ±LEDGER_MAX_ABS_AMOU
   raw.economy.ledger = [{ id: "l_x", t: 1, type: "earn", amount: 31 }];
   assert.equal(Migrate.validateImport(raw).ok, true);
 });
+
+// --- Closing review 2026-08-26: legitimate round-trip + requests validation ---
+test("[review] a state produced by start→paint round-trips through validateImport", () => {
+  const { SessionCore } = require("../core.js");
+  const state = Migrate.emptyState(0);
+  SessionCore.start(state, () => 0.5, 1000);
+  SessionCore.paint(state, 1500);
+  const raw = JSON.parse(JSON.stringify(state));
+  assert.equal(Migrate.validateImport(raw).ok, true);
+  assert.equal(Migrate.validateImport(Migrate.migrate(raw)).ok, true);
+});
+
+test("[review] validateImport rejects a request with a string costSnapshot or bad status", () => {
+  const raw = Migrate.emptyState(0);
+  raw.economy.requests = [{ id: "q1", rewardId: "r1", nameSnapshot: "x", costSnapshot: "<img src=x onerror=1>", t: 1, status: "requested" }];
+  assert.equal(Migrate.validateImport(raw).ok, false);
+  raw.economy.requests = [{ id: "q1", rewardId: "r1", nameSnapshot: "x", costSnapshot: 10, t: 1, status: "weird" }];
+  assert.equal(Migrate.validateImport(raw).ok, false);
+  raw.economy.requests = [{ id: "q1", rewardId: "r1", nameSnapshot: "x", costSnapshot: 10, t: 1, status: "requested" }];
+  raw.economy.rewards = [{ id: "r1", name: "x", cost: 10, active: true }];
+  assert.equal(Migrate.validateImport(raw).ok, true);
+});

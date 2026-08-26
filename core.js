@@ -953,6 +953,25 @@
           });
         }
       }
+      if (raw.economy && raw.economy.rewards !== undefined) {
+        if (!Array.isArray(raw.economy.rewards)) problems.push("economy.rewards must be an array");
+        else raw.economy.rewards.forEach(function (r, i) {
+          if (!r || typeof r !== "object") { problems.push("rewards[" + i + "] is not an object"); return; }
+          if (typeof r.id !== "string" || !r.id) problems.push("rewards[" + i + "].id must be a non-empty string");
+          if (typeof r.name !== "string") problems.push("rewards[" + i + "].name must be a string");
+          if (typeof r.cost !== "number" || !isFinite(r.cost) || r.cost < 0 || r.cost > CONFIG.LEDGER_MAX_ABS_AMOUNT) problems.push("rewards[" + i + "].cost out of range");
+        });
+      }
+      if (raw.economy && raw.economy.requests !== undefined) {
+        if (!Array.isArray(raw.economy.requests)) problems.push("economy.requests must be an array");
+        else raw.economy.requests.forEach(function (q, i) {
+          if (!q || typeof q !== "object") { problems.push("requests[" + i + "] is not an object"); return; }
+          if (typeof q.id !== "string" || !q.id) problems.push("requests[" + i + "].id must be a non-empty string");
+          if (typeof q.nameSnapshot !== "string") problems.push("requests[" + i + "].nameSnapshot must be a string");
+          if (typeof q.costSnapshot !== "number" || !isFinite(q.costSnapshot) || q.costSnapshot < 0 || q.costSnapshot > CONFIG.LEDGER_MAX_ABS_AMOUNT) problems.push("requests[" + i + "].costSnapshot out of range");
+          if (["requested", "approved", "rejected", "cancelled"].indexOf(q.status) === -1) problems.push("requests[" + i + "].status invalid");
+        });
+      }
       if (raw.facts !== undefined && (typeof raw.facts !== "object" || raw.facts === null || Array.isArray(raw.facts))) {
         problems.push("facts must be an object");
       } else if (raw.facts) {
