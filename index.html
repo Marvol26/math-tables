@@ -221,7 +221,7 @@
       resumeCta: "ממשיכות!",
       greeting: function (name) { return "היי, " + name + "!"; },
       mapBtn: "המפה שלי 🗺️",
-      mapStatus: function (table, progress, required) { return "🐢 את בתחנה " + bdi("×" + table) + " · " + bdi(progress + "/" + required); },
+      mapStatus: function (table, progress, required) { return "🐢 את בתחנה " + tableTag(table) + " · " + bdi(progress + "/" + required); },
       mapDone: "🐢👑 הגעת לטירה! כל התחנות שלך",
       collectionBtn: "האוסף שלי 🎁",
       rewardsBtn: "פרסים 🎈",
@@ -274,7 +274,7 @@
       learnedToday: "למדנו היום",
       learnedItem: function (a, b, product) { return a + " × " + b + " = " + product; },
       unlockReveal: "פתחת מדבקה חדשה!",
-      stationReached: function (table) { return "הגעת לתחנה " + bdi("×" + table) + "! 🎉"; },
+      stationReached: function (table) { return "הגעת לתחנה " + tableTag(table) + "! 🎉"; },
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
       coinsEarned: function (n) { return bdi("+" + n) + " 🪙"; },
@@ -284,7 +284,7 @@
       title: "המפה שלי",
       backBtn: "חזרה",
       castle: "🏰",
-      stationTitle: function (table) { return "תחנה " + bdi("×" + table); },
+      stationTitle: function (table) { return "תחנה " + tableTag(table); },
       reachedLabel: "הגעת! ⭐",
       currentLabel: "כאן את עכשיו 🐢",
       aheadLabel: "עוד לא",
@@ -542,6 +542,10 @@
   // surrounding RTL bidi context (I10) — without this, "+21" can visually
   // reorder to "21+" inside RTL text (confirmed live: the summary screen's
   // coin badge). Wrap every interpolated number, not just equations.
+  // "×7" has no strong-direction character, so inside RTL text it flips to
+  // "7×"; an explicit LTR island keeps the × in front (I10).
+  function tableTag(n) { return '<span class="ltr">×' + Number(n) + "</span>"; }
+
   function bdi(content) {
     return "<bdi>" + content + "</bdi>";
   }
