@@ -928,7 +928,10 @@
   function showFeedback(result) {
     var screenEl = document.querySelector('[data-screen="question"]');
     var fast = result.ok && result.withinLimit && !result.retry;
-    if (screenEl) screenEl.classList.add(result.ok ? (fast ? "feedback-correct feedback-fast" : "feedback-correct") : "feedback-wrong");
+    if (screenEl) {
+      screenEl.classList.add(result.ok ? "feedback-correct" : "feedback-wrong");
+      if (fast) screenEl.classList.add("feedback-fast"); // classList.add takes one token per argument
+    }
     var equation = document.getElementById("equation");
     var note = document.createElement("div");
     if (!result.ok) {
@@ -946,8 +949,10 @@
       var pill = document.querySelector(".coin-pill");
       if (pill) pill.innerHTML = bdi("+" + Number(result.coins)) + " 🪙"; // result.coins is always our own number, never user input
     }
-    if (result.ok) { confettiBurst(fast ? 40 : 18); blip(fast ? SOUNDS.fast : SOUNDS.correct); }
-    else { blip(SOUNDS.wrong); }
+    try {
+      if (result.ok) { confettiBurst(fast ? 40 : 18); blip(fast ? SOUNDS.fast : SOUNDS.correct); }
+      else { blip(SOUNDS.wrong); }
+    } catch (e) { /* effects are decoration; the session must advance regardless */ }
     clearTimeout(App.feedbackTimer);
     App.feedbackTimer = setTimeout(function () {
       if (currentHashScreen() !== "question") return; // P9: the child left mid-feedback
@@ -1049,9 +1054,11 @@
     );
     bindAction("again", startOrResumeSession);
     bindAction("done", function () { navigate("home"); });
-    if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
-    else if (session.unlocksEarned.length) { confettiBurst(30); blip(SOUNDS.unlock); }
-    else { confettiBurst(12); }
+    try {
+      if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
+      else if (session.unlocksEarned.length) { confettiBurst(30); blip(SOUNDS.unlock); }
+      else { confettiBurst(12); }
+    } catch (e) { /* decoration only */ }
   }
 
   // ------------------------------------------------------------------
