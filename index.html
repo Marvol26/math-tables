@@ -91,8 +91,8 @@
   .turtle-zzz { position: absolute; bottom: 30px; font-size: 1rem; animation: zzz-float 1.6s ease-in-out infinite; }
   @keyframes zzz-float { 0% { transform: translateY(0); opacity: 0.6; } 100% { transform: translateY(-10px); opacity: 1; } }
   /* Wrong-answer helper: the fact as rows of dots */
-  .dot-array { display: grid; gap: 4px; direction: ltr; justify-content: center; margin: 0.4rem auto 0; }
-  .dot-array span { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); opacity: 0; animation: dot-in 0.25s ease forwards; }
+  .dot-array { --dot: 12px; display: grid; gap: 4px; direction: ltr; justify-content: center; margin: 0.4rem auto 0; }
+  .dot-array span { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--primary); opacity: 0; animation: dot-in 0.25s ease forwards; }
   @keyframes dot-in { to { opacity: 1; transform: scale(1); } }
   .dot-array-caption { font-weight: bold; color: var(--text); }
   .chart-value { font: 10px sans-serif; fill: #2B2D42; }
@@ -127,6 +127,8 @@
   }
   @media (max-height: 600px) {
     .screen { padding: 0.5rem; gap: 0.4rem; }
+    .turtle-track { height: 36px; }
+    .dot-array { --dot: 9px; gap: 3px; }
     .equation { font-size: clamp(28px, 8vw, 56px); }
   }
   /* Short+wide (iPhone SE/most phones landscape, iPad Split View 1/3): a
@@ -145,6 +147,7 @@
     [data-screen="question"] .numpad button { min-height: 44px; min-width: 44px; font-size: 1.1rem; }
     [data-screen="question"] .coin-pill { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
     [data-screen="question"] .turtle-track { width: min(260px, 38vw); height: 36px; }
+    [data-screen="question"] .dot-array { --dot: 7px; gap: 2px; }
   }
   #stale-card {
     display: none;
@@ -183,7 +186,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js"></script>
+<script src="core.js?v=0.5.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -239,7 +242,7 @@
       exitConfirmNo: "לא, ממשיכות",
       timeoutMessage: "הצב הגיע ונח 😴 — אפשר לאט 🙂",
       helperCaption: function (a, b, product) { return a + " × " + b + " = " + product; },
-      helperRows: function (a, b) { return bdi(a) + " שורות של " + bdi(b); },
+      helperRows: function (a, b) { return a === 1 ? "שורה אחת של " + bdi(b) : bdi(a) + " שורות של " + bdi(b); },
       interruptedLabel: "ממשיכות בלי שעון",
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
@@ -949,15 +952,18 @@
     var p = MathCore.Facts.parts(asked);
     var rows = p[0], cols = p[1];
     var cells = "";
+    var rowDelay = Math.round(CONFIG.HELPER_CASCADE_MS / rows);
     for (var r = 0; r < rows; r++) {
       for (var c = 0; c < cols; c++) {
-        cells += '<span style="animation-delay:' + (r * 220 + c * 25) + 'ms"></span>';
+        cells += '<span style="animation-delay:' + (r * rowDelay) + 'ms"></span>';
       }
     }
+    // Caption first: the answer must be visible even when a 10×10 grid pushes
+    // the bottom of the card below a short landscape viewport.
     return (
-      '<div class="dot-array" style="grid-template-columns:repeat(' + cols + ',12px)">' + cells + "</div>" +
+      '<div class="dot-array-caption ltr">' + T.question.helperCaption(rows, cols, rows * cols) + "</div>" +
       '<div class="muted">' + T.question.helperRows(rows, cols) + "</div>" +
-      '<div class="dot-array-caption ltr">' + T.question.helperCaption(rows, cols, rows * cols) + "</div>"
+      '<div class="dot-array" style="grid-template-columns:repeat(' + cols + ',var(--dot))">' + cells + "</div>"
     );
   }
 
@@ -1486,7 +1492,7 @@
   // "סבב N" labels under the first/last point. opts.fmt formats a value for
   // display; opts.format builds the tooltip.
   function lineChartSvg(values, opts) {
-    var w = 320, h = 120, padL = 34, padR = 30, padT = 16, padB = 18;
+    var w = 320, h = 120, padL = 34, padR = 36, padT = 22, padB = 18;
     if (!values.length) return '<svg width="' + w + '" height="' + h + '"></svg>';
     var fmt = opts.fmt || function (v) { return String(Math.round(v)); };
     var max = Math.max.apply(null, values.concat([0]));
@@ -1500,20 +1506,24 @@
       return { x: x, y: y, v: v };
     });
     var polyline = points.map(function (p) { return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" ");
-    var labelFrom = Math.max(0, values.length - 12);
+    // Label every k-th point (counting back from the newest) so labels never
+    // crowd: k grows with the point count. Every point keeps its tooltip.
+    var labelEvery = Math.max(1, Math.ceil(28 / (stepX || 28)));
     var circles = points
       .map(function (p, i) {
         var titleText = opts.format ? opts.format(p.v, i) : String(p.v);
-        var label = i >= labelFrom && i !== values.length - 1
-          ? '<text class="chart-value" x="' + p.x.toFixed(1) + '" y="' + (p.y - (i % 2 ? 15 : 6)).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(p.v)) + "</text>" // staggered so equal neighbours don't collide
+        var showLabel = i !== values.length - 1 && (values.length - 1 - i) % labelEvery === 0;
+        var label = showLabel
+          ? '<text class="chart-value" x="' + p.x.toFixed(1) + '" y="' + (p.y - 6).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(p.v)) + "</text>"
           : "";
         return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3" fill="#4F7CFF"><title>' + escapeHtml(titleText) + "</title></circle>" + label;
       })
       .join("");
     var last = points[points.length - 1];
+    var badgeX = Math.min(last.x + 6, w - 30); // keep the badge inside the viewBox
     var lastBadge =
-      '<rect x="' + (last.x + 6).toFixed(1) + '" y="' + (last.y - 9).toFixed(1) + '" width="26" height="16" rx="8" fill="#FFC93C" />' +
-      '<text class="chart-value" x="' + (last.x + 19).toFixed(1) + '" y="' + (last.y + 3).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(last.v)) + "</text>";
+      '<rect x="' + badgeX.toFixed(1) + '" y="' + (last.y - 20).toFixed(1) + '" width="28" height="16" rx="8" fill="#FFC93C" />' +
+      '<text class="chart-value" x="' + (badgeX + 14).toFixed(1) + '" y="' + (last.y - 8).toFixed(1) + '" text-anchor="middle">' + escapeHtml(fmt(last.v)) + "</text>";
     var grid =
       '<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + padT + '" y2="' + padT + '" stroke="#E4E8F0" />' +
       '<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + (padT + innerH / 2) + '" y2="' + (padT + innerH / 2) + '" stroke="#E4E8F0" stroke-dasharray="3 3" />' +

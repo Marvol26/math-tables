@@ -65,6 +65,7 @@
     // UI timing (shared so no number lives outside CONFIG — I7)
     WRONG_ANSWER_DISPLAY_MS: 1800,
     WRONG_ANSWER_HELPER_MS: 3200, // a wrong answer shows the dot-array picture; needs a beat longer to absorb
+    HELPER_CASCADE_MS: 1100, // the dot rows light up over this much time, whatever the row count
     ANIMATION_MAX_MS: 1800,
   };
 
