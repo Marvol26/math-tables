@@ -86,14 +86,12 @@ test("value(): tiers 1/2/10 -> 1, 3/4/5 -> 2, 6/7/8/9 -> 3; mastered pays 1 flat
 });
 
 // --- Punch-list P6 (2026-08-26): tier rule switch, default unchanged ---
-test("[P6] CONFIG.TIER_BY defaults to max; 'min' reprices 1x6 to 1 and keeps 6x7 at 3", () => {
+test("[P6] CONFIG.TIER_BY is 'min' (Marat 2026-08-26): 1x6 pays 1, 6x7 pays 3, 3x9 pays 2; 'max' still works", () => {
   const state = require("../core.js").Migrate.emptyState(0);
-  assert.equal(CONFIG.TIER_BY, "max");
-  assert.equal(Facts.value(state, "1x6"), 3);
-  CONFIG.TIER_BY = "min";
-  try {
-    assert.equal(Facts.value(state, "1x6"), 1);
-    assert.equal(Facts.value(state, "6x7"), 3);
-    assert.equal(Facts.value(state, "3x9"), 2);
-  } finally { CONFIG.TIER_BY = "max"; }
+  assert.equal(CONFIG.TIER_BY, "min");
+  assert.equal(Facts.value(state, "1x6"), 1);
+  assert.equal(Facts.value(state, "6x7"), 3);
+  assert.equal(Facts.value(state, "3x9"), 2);
+  CONFIG.TIER_BY = "max";
+  try { assert.equal(Facts.value(state, "1x6"), 3); } finally { CONFIG.TIER_BY = "min"; }
 });

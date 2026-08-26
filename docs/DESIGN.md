@@ -41,7 +41,7 @@ Fonts: Google Fonts "Varela Round" with a system fallback stack; not cached by t
 `CONFIG` · `T` (all strings, feminine) · `Storage` (load/save/migrate/export/import/journal) · `Facts` · `Economy` (values, ledger, unlocks) · `Selector` · `Session` (runtime + journal) · `Stats` (pure, first-attempt-only) · `Charts` (inline SVG + CSS-grid heatmap) · `UI` (router, numpad + keyboard, animations, PIN) · `App.init()`.
 
 ## 5. Game economy (all numbers in `CONFIG`)
-- **Fact value** = tier of `max(a,b)`: {1,2,10} → 1 🪙, {3,4,5} → 2, {6,7,8,9} → 3. **Mastered facts pay 1 🪙 flat** (review value; stops grinding known facts — R1 #5).
+- **Fact value** = tier of the **smaller** operand `min(a,b)` (Marat, 2026-08-26 — was `max` in v4): {1,2,10} → 1 🪙, {3,4,5} → 2, {6,7,8,9} → 3. So 1×6 = 1, 3×9 = 2, 6×7 = 3. `CONFIG.TIER_BY` switches the rule. **Mastered facts pay 1 🪙 flat** (review value; stops grinding known facts — R1 #5).
 - **First attempt correct** earns the value; **within challenge limit** doubles it; **retries earn 0** ("עכשיו את יודעת! ✨") and do not extend streaks.
 - **Streak**: 5 first-attempt correct in a row → +2 🪙, flame badge.
 - **Perfect session**: fixed celebration always (D11). Economic bonus **+5 🪙, only for the first perfect session of the day**; 9/10 gets +2 "כמעט מושלם!" — no cliff, no random rare-sticker stake (R1 #6).

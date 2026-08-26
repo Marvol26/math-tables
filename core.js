@@ -24,8 +24,8 @@
     TIER_VALUE: { 1: 1, 2: 2, 3: 3 }, // tier index -> coin value
     // Which operand decides the tier: "max" (DESIGN v4 rule: 1x6 pays like 6x6)
     // or "min" (1x6 pays 1, 6x7 pays 3). Changing this reprices the live
-    // economy — Marat's call (punch-list P6, 2026-08-26).
-    TIER_BY: "max",
+    // economy — Marat chose "min" on 2026-08-26 (punch-list P6).
+    TIER_BY: "min",
     LEDGER_MAX_ABS_AMOUNT: 10000, // import validation bound (P10)
     MASTERED_VALUE: 1,
     WITHIN_LIMIT_MULTIPLIER: 2,

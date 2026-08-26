@@ -215,3 +215,9 @@ commit: c9292e2 (HEAD; 4 commits ahead of origin/main: 201ab1b, 9a62f04, f5da8f1
 evidence: same reviewer re-read 23bf9ea..HEAD and re-ran npm test (83/83): all findings FIXED; heatmap-tooltip digit order accepted as cosmetic (commutative). Verdict SHIP. Residual for Marat's device pass: Challenge-Mode fast answer (browser-only path), export in iOS standalone (P13).
 deviations: none
 assumptions discovered: none. Push to origin/main (→ GitHub Pages, sw v5) awaiting Marat's yes.
+
+## 2026-08-26T18:05:00Z · P6 tier rule + deploy · DONE
+commit: see git log (tier switch + this entry)
+evidence: Marat chose "smaller operand sets the tier" → CONFIG.TIER_BY = "min" (1×6 = 1 🪙, 3×9 = 2, 6×7 = 3); DESIGN §5 amended with date; test updated; npm test 83/83; tools/simulate-economy.js → weak 183 / average 75 / strong 62 sessions to complete the collection (average within the 60–110 done-when). Marat authorized the push ("Yes, push now"). Pushed to origin/main → GitHub Pages; sw VERSION v5 / APP_VERSION 0.4.0.
+deviations: none
+assumptions discovered: none
