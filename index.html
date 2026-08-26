@@ -318,7 +318,7 @@
     },
   };
 
-  var APP_VERSION = "0.2.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.3.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -405,10 +405,6 @@
   // very first question of a session as interrupted (caught via live
   // browser testing, not by any unit test).
   function navigate(screen) {
-    // Leaving the parent area re-locks it (PIN required again next time).
-    if (currentHashScreen() === "parent" && screen !== "parent") {
-      App.parentUnlocked = false;
-    }
     var target = "#screen=" + screen;
     if (location.hash === target) {
       route();
@@ -421,14 +417,28 @@
     document.getElementById("app").innerHTML = html;
   }
 
+  // Tracks the screen route() last rendered so the parent re-lock below
+  // fires on ANY way of leaving "parent" — not just navigate() calls.
+  // A browser/PWA back-gesture or hash edit fires hashchange -> route()
+  // directly, bypassing navigate() entirely; re-locking only inside
+  // navigate() left the dashboard unlocked for whoever opened it next
+  // (WP9 review finding A).
+  var lastRoutedScreen = null;
+
   function route() {
     clearInterval(challengeTimerHandle); // never leave a challenge timer running behind a navigated-away screen
+    // Leaving the parent area re-locks it (PIN required again next time),
+    // regardless of how we got here.
+    if (lastRoutedScreen === "parent" && currentHashScreen() !== "parent") {
+      App.parentUnlocked = false;
+    }
     var state = S();
     if (!state.settings.pinHash) {
       Screens.parentSetup();
       return;
     }
     var name = currentHashScreen();
+    lastRoutedScreen = name;
     var fn = Screens[name] || Screens.home;
     fn();
     refreshUpdateToast();
@@ -825,7 +835,17 @@
     document.body.appendChild(overlay);
     overlay.querySelector('[data-action="exit-yes"]').addEventListener("click", function () {
       document.body.removeChild(overlay); // exit only suspends (D12) — state.active already journaled
-      navigate("home");
+      // Mark the in-flight question interrupted NOW, while we still know the
+      // child is deliberately leaving it. Without this, resuming later from
+      // Home (startOrResumeSession's `else navigate("question")` branch)
+      // short-circuits straight to renderQuestion() with the original
+      // shownAt intact — the resumed answer's real elapsed time gets scored
+      // as a slow ordinary attempt (denying an earned Challenge bonus and
+      // poisoning that fact's mastery/median stats) instead of being
+      // excluded like every other interruption (WP9 review finding B).
+      save(function (s) { MathCore.SessionCore.markInterrupted(s); }).then(function () {
+        navigate("home");
+      });
     });
     overlay.querySelector('[data-action="exit-no"]').addEventListener("click", function () {
       document.body.removeChild(overlay);

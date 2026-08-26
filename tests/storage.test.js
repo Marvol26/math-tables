@@ -130,13 +130,31 @@ test("importJson keeps the device's own pinHash even though the imported blob ha
   const foreign = Migrate.emptyState();
   foreign.settings.pinHash = "foreign-hash";
   foreign.settings.childName = "ילד אחר";
-  foreign.sessions = [{ id: "s_foreign" }];
+  foreign.sessions = [{ id: "s_foreign", planned: ["6x7"], firstTryCorrect: 1, coinsEarned: 5, masteredAfter: 0 }];
 
   const result = await storage.importJson(JSON.stringify(foreign), 100);
   assert.equal(result.ok, true);
   assert.equal(storage.state.settings.pinHash, devicePinHash);
   assert.equal(storage.state.settings.childName, "ילד אחר");
-  assert.deepEqual(storage.state.sessions, [{ id: "s_foreign" }]);
+  assert.deepEqual(storage.state.sessions, [{ id: "s_foreign", planned: ["6x7"], firstTryCorrect: 1, coinsEarned: 5, masteredAfter: 0 }]);
+});
+
+test("[WP9 finding C] exportJson strips settings.pinHash/recoveryHash from the serialized backup but not from live state", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "db-export" });
+  await storage.load();
+  storage.state = seedState();
+  storage.state.settings.recoveryHash = "recovery-salt:recovery-digest";
+  await storage.save(() => {}, 50);
+
+  const result = await storage.exportJson(100);
+  assert.equal(result.ok, true);
+  const parsed = JSON.parse(result.json);
+  assert.equal(parsed.settings.pinHash, undefined);
+  assert.equal(parsed.settings.recoveryHash, undefined);
+  // Live in-memory state must still have its own PIN — only the serialized copy is stripped.
+  assert.equal(storage.state.settings.pinHash, "salt:digest");
+  assert.equal(storage.state.settings.recoveryHash, "recovery-salt:recovery-digest");
 });
 
 test("importJson rejects a malformed blob without touching state", async () => {

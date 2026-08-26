@@ -69,6 +69,46 @@ session could only partially verify from a desktop Chrome emulator:
 - Change-PIN from inside the (already-unlocked) parent dashboard doesn't
   re-prompt for the old PIN.
 
+## WP9 adversarial review — LOW findings deferred (not blocking ship)
+The WP9 closing review (fresh Fable 5 reviewer, full-batch diff) confirmed
+SHIP-AFTER-FIXES after HIGH/MEDIUM findings A–D were fixed (see
+math-build-status.md WP9 entry for the fixes). These LOWs were recorded but
+not fixed — ride along or address later, per the reviewer's own wording:
+- **Daily streak breaks across DST**: `Economy` streak-counting walks fixed
+  24h steps over local-midnight keys (`core.js` ~810-819); on Israel's fall
+  DST change the 25-hour day can make the cursor miss the stored `dayStart`,
+  silently ending a genuine streak once a year.
+- **Home coin pill shows lifetime coins, not balance**: after a reward
+  redemption, Home's coin number doesn't drop the way the Rewards screen's
+  does. Possibly intentional (collection is lifetime-progress-based) but
+  never explicitly decided — worth a design call from Marat, not obviously
+  a bug.
+- **Hard-rule-2 (all user-visible strings in `T`) violations found**: heatmap
+  tooltips show English `mastered/learning/new` literals; a handful of
+  hardcoded Hebrew strings in `showImportPreview` (invalid-file message,
+  the "X סבבים, Y מטבעות" preview line), "אין עדיין נתונים"/"אין עדיין
+  סבבים"/"(הוסר)", the update-toast text, and the boot "טוענת..." string.
+  Should be moved into `T` in a future pass.
+- **No save-retry**: DESIGN §8 says a failed save is retried once before
+  showing the error banner; `Storage.save` currently goes straight to the
+  banner on any failure.
+- **Approve-reward double-click surfaces the wrong error text**: a second,
+  already-processed approve returns reason `"already processed"` but the UI
+  maps every failure to "אין מספיק מטבעות" (not enough coins). No double
+  charge occurs (the underlying guard is sound) — this is a UI messaging
+  issue only.
+- **Exiting during the ~1.8s post-answer feedback window can re-paint the
+  question over Home**: `showFeedback`'s `setTimeout` isn't cancelled on
+  navigation, so tapping ✕ within that window can be followed by the timer
+  firing a `paint()` that repaints the question screen on top of Home with
+  the hash still at `#screen=home`. Code-inspection finding, not yet
+  live-reproduced; likely fixable by cancelling the timeout in `onExitClick`
+  the same way the WP9 interrupted-marking fix does.
+- **Stale-state banner bypassed on some recovery paths**: a stale
+  `backupThenReplace`/`undo` surfaces a generic error (or nothing, for
+  reset/undo) instead of the proper stale-state card; the next ordinary
+  save does show it correctly.
+
 ## Skill scouting (standing rule 5 — proposal only, not created)
 Two repeatable patterns emerged this cycle that could become skills if
 Marat wants them formalized:

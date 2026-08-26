@@ -943,9 +943,34 @@
       }
       if (raw.facts !== undefined && (typeof raw.facts !== "object" || raw.facts === null || Array.isArray(raw.facts))) {
         problems.push("facts must be an object");
+      } else if (raw.facts) {
+        Object.keys(raw.facts).forEach(function (k) {
+          var fact = raw.facts[k];
+          if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
+            problems.push("facts[" + k + "] must be an object");
+            return;
+          }
+          if (typeof fact.attempts !== "number") problems.push("facts[" + k + "].attempts must be a number");
+          if (typeof fact.correct !== "number") problems.push("facts[" + k + "].correct must be a number");
+          if (typeof fact.lastSeen !== "number") problems.push("facts[" + k + "].lastSeen must be a number");
+          if (fact.recent !== undefined && !Array.isArray(fact.recent)) problems.push("facts[" + k + "].recent must be an array");
+        });
       }
-      if (raw.sessions !== undefined && !Array.isArray(raw.sessions)) {
-        problems.push("sessions must be an array");
+      if (raw.sessions !== undefined) {
+        if (!Array.isArray(raw.sessions)) {
+          problems.push("sessions must be an array");
+        } else {
+          raw.sessions.forEach(function (session, i) {
+            if (!session || typeof session !== "object") {
+              problems.push("sessions[" + i + "] is not an object");
+              return;
+            }
+            if (!Array.isArray(session.planned)) problems.push("sessions[" + i + "].planned must be an array");
+            if (typeof session.firstTryCorrect !== "number") problems.push("sessions[" + i + "].firstTryCorrect must be a number");
+            if (typeof session.coinsEarned !== "number") problems.push("sessions[" + i + "].coinsEarned must be a number");
+            if (typeof session.masteredAfter !== "number") problems.push("sessions[" + i + "].masteredAfter must be a number");
+          });
+        }
       }
       if (raw.settings !== undefined && (typeof raw.settings !== "object" || raw.settings === null)) {
         problems.push("settings must be an object");
@@ -1221,12 +1246,24 @@
   };
 
   // Sets lastExportAt (a real save, so other windows see it too) then
-  // returns the serialized JSON.
+  // returns the serialized JSON. Strips settings.pinHash/recoveryHash from
+  // the SERIALIZED copy only (never from self.state, which still needs
+  // them) — a backup file is meant to move off-device (email, Drive), and
+  // DESIGN §8 treats these as device-local; leaving them in gave anyone who
+  // ever saw a backup file an offline-crackable copy of the parent PIN and
+  // recovery code (WP9 review finding C). Round-trip is unaffected: an
+  // import already nulls foreign pinHash/recoveryHash and re-applies the
+  // importing device's own values, and Migrate falls back to null when
+  // these keys are absent, same as when they were explicitly null.
   StorageInstance.prototype.exportJson = function (now) {
     var self = this;
     return self.save(function (s) { s.lastExportAt = now; }, now).then(function (result) {
       if (!result.ok) return result;
-      return { ok: true, json: JSON.stringify(self.state) };
+      var json = JSON.stringify(self.state, function (key, value) {
+        if (key === "pinHash" || key === "recoveryHash") return undefined;
+        return value;
+      });
+      return { ok: true, json: json };
     });
   };
 

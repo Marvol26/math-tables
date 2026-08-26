@@ -69,6 +69,31 @@ test("validateImport() rejects an active session missing queue/retryQueue/attemp
   assert.ok(result.problems.some((p) => p.indexOf("active.attempts") !== -1));
 });
 
+test("[WP9 finding D] validateImport() rejects a malformed session entry (would crash Stats.trends on s.planned.length)", () => {
+  const raw = sampleRaw();
+  raw.sessions.push({}); // missing planned/firstTryCorrect/coinsEarned/masteredAfter
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("sessions[0].planned") !== -1));
+  assert.ok(result.problems.some((p) => p.indexOf("sessions[0].firstTryCorrect") !== -1));
+});
+
+test("[WP9 finding D] validateImport() rejects a fact value that isn't an object (would crash Facts.updateFromAttempt in strict mode)", () => {
+  const raw = sampleRaw();
+  raw.facts["2x7"] = "junk";
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("facts[2x7]") !== -1));
+});
+
+test("[WP9 finding D] validateImport() rejects a fact object missing numeric attempts/correct/lastSeen", () => {
+  const raw = sampleRaw();
+  raw.facts["3x4"] = { recent: [] };
+  const result = Migrate.validateImport(raw);
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((p) => p.indexOf("facts[3x4].attempts") !== -1));
+});
+
 test("validateImport() rejects an active session with a non-string id", () => {
   const raw = sampleRaw();
   raw.active = { id: 123, planned: [], queue: [], retryQueue: [], attempts: [] };
