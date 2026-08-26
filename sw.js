@@ -11,7 +11,12 @@ self.addEventListener("install", function (event) {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then(function (cache) { return cache.addAll(PRECACHE_URLS); })
+      // cache: "reload" bypasses the HTTP cache so a new VERSION never
+      // precaches a stale core.js next to a fresh index.html (version skew
+      // seen live on 2026-08-27: old core.js + new index.html froze feedback).
+      .then(function (cache) {
+        return cache.addAll(PRECACHE_URLS.map(function (url) { return new Request(url, { cache: "reload" }); }));
+      })
       .then(function () { return self.skipWaiting(); })
   );
 });

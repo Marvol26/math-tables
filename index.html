@@ -987,7 +987,14 @@
     var note = document.createElement("div");
     if (!result.ok) {
       note.className = "wrong-helper";
-      note.innerHTML = dotArrayHtml(result.asked); // numbers only — built from the fact, never from input
+      // The fact comes from our own state, never from input. If anything about
+      // the picture fails, fall back to the plain answer line — feedback must
+      // never die (the session would freeze behind feedbackLock).
+      try {
+        var askedKey = result.asked || (S().active && S().active.attempts.length ? S().active.attempts[S().active.attempts.length - 1].asked : null);
+        note.innerHTML = askedKey ? dotArrayHtml(askedKey) : "";
+      } catch (e) { note.innerHTML = ""; }
+      if (!note.innerHTML) { note.className = "muted"; note.textContent = T.question.wrongAnswerWas(result.correctAnswer); }
     } else if (fast) {
       note.className = "fast-badge"; // P3: "something nice" for beating the clock
       note.textContent = T.question.beatClock;
