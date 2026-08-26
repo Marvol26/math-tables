@@ -566,6 +566,8 @@
         coins: attemptRecord.coins,
         correctAnswer: Facts.answer(current.asked),
         interrupted: attemptRecord.interrupted,
+        retry: attemptRecord.retry,
+        withinLimit: attemptRecord.withinLimit,
       };
     },
 

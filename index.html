@@ -86,13 +86,27 @@
   @keyframes flash-green { 0%, 100% { color: var(--text); } 30% { color: var(--correct); } }
   @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-8px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
   .stars { font-size: 2.5rem; }
+  /* Punch-list P3 (2026-08-26): celebration layer */
+  .confetti-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 900; }
+  .confetti-piece { position: absolute; top: -12px; width: 10px; height: 14px; border-radius: 2px; animation: confetti-fall var(--dur, 1.2s) ease-in forwards; }
+  @keyframes confetti-fall { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: 0.6; } }
+  .fast-badge { display: inline-block; font-weight: bold; color: var(--primary); animation: pop 0.6s ease; }
+  @keyframes pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.25); opacity: 1; } 100% { transform: scale(1); } }
+  .feedback-fast .equation { animation: flash-gold 0.7s ease; }
+  @keyframes flash-gold { 0%, 100% { color: var(--text); } 30% { color: var(--gold); text-shadow: 0 0 18px var(--gold); } }
+  .fireworks { position: fixed; inset: 0; pointer-events: none; z-index: 900; }
+  .firework { position: absolute; width: 8px; height: 8px; border-radius: 50%; animation: firework 1.4s ease-out infinite; }
+  @keyframes firework { 0% { transform: scale(0.2); opacity: 1; box-shadow: 0 0 0 0 currentColor; } 70% { opacity: 1; } 100% { transform: scale(2.2); opacity: 0; box-shadow: 0 -40px 0 4px currentColor, 28px -28px 0 4px currentColor, 40px 0 0 4px currentColor, 28px 28px 0 4px currentColor, 0 40px 0 4px currentColor, -28px 28px 0 4px currentColor, -40px 0 0 4px currentColor, -28px -28px 0 4px currentColor; } }
+  .sticker-reveal { font-size: 3rem; display: inline-block; animation: pop 0.8s ease; }
+  .summary-title-perfect { animation: pop 0.8s ease; }
   .sticker-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 0.6rem; width: min(480px, 92vw); }
   .sticker { font-size: 2rem; background: var(--card-bg); border-radius: 16px; padding: 0.6rem; opacity: 0.25; }
   .sticker.unlocked { opacity: 1; }
   .reward-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(420px, 92vw); }
   .banner { position: fixed; left: 0; right: 0; text-align: center; padding: 0.6rem 1rem; z-index: 800; }
   @media (prefers-reduced-motion: reduce) {
-    .feedback-correct .equation, .feedback-wrong .equation { animation: none; }
+    .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect { animation: none; }
+    .confetti-layer, .fireworks { display: none; }
   }
   @media (max-height: 600px) {
     .screen { padding: 0.5rem; gap: 0.4rem; }
@@ -149,7 +163,7 @@
 <div id="save-failure-banner" class="banner" role="alert"></div>
 <div id="update-toast" class="banner" role="status" style="display:none;top:0;background:var(--primary);color:#fff">
   <span id="update-toast-text"></span>
-  <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem">רענני</button>
+  <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
 <script src="core.js"></script>
@@ -170,7 +184,8 @@
 
     home: {
       startCta: "בואי נתחיל!",
-      resumeCta: "ממשיכים!",
+      resumeCta: "ממשיכות!",
+      greeting: function (name) { return "היי, " + name + "!"; },
       collectionBtn: "האוסף שלי 🎁",
       rewardsBtn: "פרסים 🎈",
       parentBtn: "הורים",
@@ -199,8 +214,9 @@
       equalsCoin: function (n) { return "שווה " + bdi(n) + " 🪙"; },
       check: "✓",
       clear: "⌫",
-      showKeyboard: "הצג מקלדת",
-      showNumpad: "הצג מקלדת מספרים",
+      showKeyboard: "הציגי מקלדת",
+      showNumpad: "הציגי מקלדת מספרים",
+      beatClock: "מהר מאוד! ⚡ מטבעות כפולים!",
       exitConfirmTitle: "יוצאות? נמשיך אחר כך מאותו מקום",
       exitConfirmYes: "כן, יוצאות",
       exitConfirmNo: "לא, ממשיכות",
@@ -215,8 +231,9 @@
       perfectTitle: "מושלם!!! 🎆",
       perfectSub: "כל התשובות נכונות!",
       nearPerfectTitle: "כמעט מושלם! 🌟",
-      encouragingTitle: "כל הכבוד, ממשיכים!",
+      encouragingTitle: "כל הכבוד, ממשיכות!",
       learnedToday: "למדנו היום",
+      learnedItem: function (a, b, product) { return a + " × " + b + " = " + product; },
       unlockReveal: "פתחת מדבקה חדשה!",
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
@@ -315,10 +332,106 @@
       resetCancelBtn: "ביטול",
       lastExportLabel: function (dateStr) { return "גיבוי אחרון: " + dateStr; },
       neverExported: "לא גובה מעולם",
+      removedSuffix: " (הוסר)",
+      noDataYet: "אין עדיין נתונים",
+      noSessionsYet: "אין עדיין סבבים",
+      invalidFile: "קובץ לא תקין",
+      genericError: "שגיאה",
+      sessionLabel: function (i) { return "סבב " + i; },
+      importSummary: function (sessions, coins, date) { return bdi(sessions) + " סבבים, " + bdi(coins) + " מטבעות, ייצוא מ-" + bdi(date); },
+      masteryNames: { new: "חדש", learning: "בלמידה", mastered: "נלמד לגמרי" },
+      heatmapTooltip: function (a, b, masteryName) { return a + " × " + b + " — " + masteryName; },
+    },
+
+    misc: {
+      updateAvailable: "יש גרסה חדשה — רענני",
+      reloadBtn: "רענני",
     },
   };
 
-  var APP_VERSION = "0.3.1"; // keep in sync with sw.js VERSION (WP5)
+  // Sticker artwork (UI concern — core.js only knows the ids). P2.
+  var STICKER_EMOJI = {
+    cat: "🐱", dog: "🐶", fox: "🦊", owl: "🦉", bee: "🐝", frog: "🐸",
+    fish: "🐠", duck: "🦆", panda: "🐼", koala: "🐨", lion: "🦁", tiger: "🐯",
+    zebra: "🦓", giraffe: "🦒", elephant: "🐘", monkey: "🐵", rabbit: "🐰", hedgehog: "🦔",
+    turtle: "🐢", dolphin: "🐬", butterfly: "🦋", ladybug: "🐞", unicorn: "🦄", dragon: "🐉",
+  };
+  function stickerArt(id) { return STICKER_EMOJI[id] || "🎁"; }
+
+  // ------------------------------------------------------------------
+  // Sound (P4): tiny WebAudio blips, gated by settings.sound. The context is
+  // created on the first user gesture (iOS requires it) and reused.
+  // ------------------------------------------------------------------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (audioCtx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+  }
+  document.addEventListener("pointerdown", ensureAudio, { passive: true });
+  document.addEventListener("keydown", ensureAudio);
+  function blip(pattern) {
+    if (!audioCtx || !App.storage || !S().settings.sound) return;
+    if (audioCtx.state === "suspended") { audioCtx.resume().catch(function () {}); }
+    var t0 = audioCtx.currentTime;
+    pattern.forEach(function (step, i) {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = step[0];
+      gain.gain.setValueAtTime(0.0001, t0 + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.18, t0 + i * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.12 + step[1]);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0 + i * 0.12);
+      osc.stop(t0 + i * 0.12 + step[1] + 0.02);
+    });
+  }
+  var SOUNDS = {
+    correct: [[660, 0.1], [880, 0.14]],
+    fast: [[660, 0.08], [880, 0.08], [1320, 0.18]],
+    wrong: [[330, 0.18]],
+    unlock: [[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.25]],
+    perfect: [[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.1], [1319, 0.3]],
+  };
+
+  // Confetti burst (P3): CSS-only pieces, removed after they fall.
+  function confettiBurst(count) {
+    var layer = document.createElement("div");
+    layer.className = "confetti-layer";
+    var colors = ["#4F7CFF", "#3CC97A", "#FFC93C", "#FF9F68", "#FF6FB5"];
+    for (var i = 0; i < count; i++) {
+      var piece = document.createElement("span");
+      piece.className = "confetti-piece";
+      piece.style.left = Math.random() * 100 + "vw";
+      piece.style.background = colors[i % colors.length];
+      piece.style.setProperty("--dur", (0.9 + Math.random() * 0.8) + "s");
+      piece.style.animationDelay = Math.random() * 0.25 + "s";
+      layer.appendChild(piece);
+    }
+    document.body.appendChild(layer);
+    setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, CONFIG.ANIMATION_MAX_MS + 300);
+  }
+
+  function fireworksShow() {
+    var layer = document.createElement("div");
+    layer.className = "fireworks";
+    var colors = ["#4F7CFF", "#3CC97A", "#FFC93C", "#FF9F68", "#FF6FB5"];
+    for (var i = 0; i < 6; i++) {
+      var f = document.createElement("span");
+      f.className = "firework";
+      f.style.left = 15 + Math.random() * 70 + "vw";
+      f.style.top = 10 + Math.random() * 50 + "vh";
+      f.style.color = colors[i % colors.length];
+      f.style.animationDelay = i * 0.35 + "s";
+      layer.appendChild(f);
+    }
+    document.body.appendChild(layer);
+    setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
+  }
+
+  var APP_VERSION = "0.4.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -427,6 +540,10 @@
 
   function route() {
     clearInterval(challengeTimerHandle); // never leave a challenge timer running behind a navigated-away screen
+    clearTimeout(App.feedbackTimer); // P9: a pending answer-feedback timer must not paint a question over another screen
+    App.feedbackLock = false;
+    var layers = document.querySelectorAll(".confetti-layer, .fireworks");
+    for (var li = 0; li < layers.length; li++) layers[li].parentNode.removeChild(layers[li]);
     // Leaving the parent area re-locks it (PIN required again next time),
     // regardless of how we got here.
     if (lastRoutedScreen === "parent" && currentHashScreen() !== "parent") {
@@ -458,11 +575,14 @@
 
   function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
+    // P7: on the very first visit there is no controller yet; the SW's first
+    // activation then posts "updated", which is an install, not an update.
+    var hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register("sw.js").catch(function () { /* best-effort */ });
     navigator.serviceWorker.addEventListener("message", function (ev) {
-      if (ev.data && ev.data.type === "updated") {
+      if (ev.data && ev.data.type === "updated" && hadController) {
         App.updateAvailable = true;
-        document.getElementById("update-toast-text").textContent = "יש גרסה חדשה — רענני";
+        document.getElementById("update-toast-text").textContent = T.misc.updateAvailable;
         refreshUpdateToast();
       }
     });
@@ -541,11 +661,13 @@
     var showInstall = !isStandaloneDisplay() && /iPad|iPhone|iPod/.test(navigator.userAgent) && /Safari/.test(navigator.userAgent);
     var lastExport = state.lastExportAt;
     var daysSinceExport = lastExport ? (Date.now() - lastExport) / (1000 * 60 * 60 * 24) : Infinity;
-    var showBackup = daysSinceExport > 14;
+    var showBackup = daysSinceExport > 14 && state.sessions.length > 0;
+    var childName = (state.settings.childName || "").trim();
 
     render(
       '<div class="screen" data-screen="home">' +
         "<h1>" + T.appTitle + "</h1>" +
+        (childName ? "<h2>" + T.home.greeting(escapeHtml(childName)) + "</h2>" : "") +
         '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<button data-action="play">' + (hasActive ? T.home.resumeCta : T.home.startCta) + "</button>" +
@@ -562,6 +684,16 @@
     bindAction("nav-rewards", function () { navigate("rewards"); });
     bindAction("nav-parent", function () { navigate("parent"); });
   };
+
+  // P8: Enter on Home starts/resumes (DESIGN §9.1).
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter" || ev.repeat) return;
+    if (currentHashScreen() !== "home") return;
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (!S() || !S().settings.pinHash) return;
+    startOrResumeSession();
+  });
 
   function startOrResumeSession() {
     var state = S();
@@ -795,19 +927,30 @@
 
   function showFeedback(result) {
     var screenEl = document.querySelector('[data-screen="question"]');
-    if (screenEl) screenEl.classList.add(result.ok ? "feedback-correct" : "feedback-wrong");
+    var fast = result.ok && result.withinLimit && !result.retry;
+    if (screenEl) screenEl.classList.add(result.ok ? (fast ? "feedback-correct feedback-fast" : "feedback-correct") : "feedback-wrong");
     var equation = document.getElementById("equation");
-    if (!result.ok && equation) {
-      var ans = document.createElement("div");
-      ans.className = "muted";
-      ans.textContent = T.question.wrongAnswerWas(result.correctAnswer);
-      equation.parentNode.insertBefore(ans, equation.nextSibling);
+    var note = document.createElement("div");
+    if (!result.ok) {
+      note.className = "muted";
+      note.textContent = T.question.wrongAnswerWas(result.correctAnswer);
+    } else if (fast) {
+      note.className = "fast-badge"; // P3: "something nice" for beating the clock
+      note.textContent = T.question.beatClock;
+    } else if (result.retry) {
+      note.className = "muted";
+      note.textContent = T.question.retryNowYouKnow; // P1: a correct retry gets its line
     }
+    if (equation && note.textContent) equation.parentNode.insertBefore(note, equation.nextSibling);
     if (result.ok && result.coins > 0) {
       var pill = document.querySelector(".coin-pill");
       if (pill) pill.innerHTML = bdi("+" + Number(result.coins)) + " 🪙"; // result.coins is always our own number, never user input
     }
-    setTimeout(function () {
+    if (result.ok) { confettiBurst(fast ? 40 : 18); blip(fast ? SOUNDS.fast : SOUNDS.correct); }
+    else { blip(SOUNDS.wrong); }
+    clearTimeout(App.feedbackTimer);
+    App.feedbackTimer = setTimeout(function () {
+      if (currentHashScreen() !== "question") return; // P9: the child left mid-feedback
       App.feedbackLock = false;
       var state = S();
       if (!state.active) { finishSession(); return; }
@@ -878,15 +1021,18 @@
   function renderSummary(session) {
     var stars = session.firstTryCorrect === session.planned.length ? 3 : session.firstTryCorrect >= 8 ? 2 : 1;
     var titleHtml = session.perfect
-      ? "<h1>" + T.summary.perfectTitle + "</h1><p>" + T.summary.perfectSub + "</p>"
+      ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + "</h1><p>" + T.summary.perfectSub + "</p>"
       : session.firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT
         ? "<h1>" + T.summary.nearPerfectTitle + "</h1>"
         : "<h1>" + T.summary.encouragingTitle + "</h1>";
     var learnedList = session.misses.length
-      ? "<p>" + T.summary.learnedToday + ": " + session.misses.map(escapeHtml).join(", ") + "</p>"
+      ? "<p>" + T.summary.learnedToday + ": " + session.misses.map(function (key) {
+          var p = MathCore.Facts.parts(key); // P5: canonical key -> "a × b = product"
+          return bdi(T.summary.learnedItem(p[0], p[1], MathCore.Facts.answer(key)));
+        }).join(", ") + "</p>"
       : "";
     var unlockHtml = session.unlocksEarned.length
-      ? '<p class="ltr">' + T.summary.unlockReveal + " " + session.unlocksEarned.map(function (id) { return "🎁"; }).join(" ") + "</p>"
+      ? "<p>" + T.summary.unlockReveal + "</p><div>" + session.unlocksEarned.map(function (id) { return '<span class="sticker-reveal">' + stickerArt(id) + "</span>"; }).join(" ") + "</div>"
       : "";
 
     render(
@@ -903,6 +1049,9 @@
     );
     bindAction("again", startOrResumeSession);
     bindAction("done", function () { navigate("home"); });
+    if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
+    else if (session.unlocksEarned.length) { confettiBurst(30); blip(SOUNDS.unlock); }
+    else { confettiBurst(12); }
   }
 
   // ------------------------------------------------------------------
@@ -915,7 +1064,7 @@
     (state.economy.unlocked || []).forEach(function (id) { unlockedSet[id] = true; });
     var stickersHtml = CONFIG.STICKERS.map(function (id, i) {
       var cls = unlockedSet[id] ? "sticker unlocked" : "sticker";
-      return '<div class="' + cls + '">' + (unlockedSet[id] ? "🎁" : "?") + "</div>";
+      return '<div class="' + cls + '" title="' + id + '">' + (unlockedSet[id] ? stickerArt(id) : "?") + "</div>";
     }).join("");
     var nextIndex = (state.economy.unlocked || []).length; // 0-based count -> next threshold n = count+1
     var progressHtml;
@@ -972,6 +1121,8 @@
     bindAction("back", function () { navigate("home"); });
     document.querySelectorAll("[data-reward]").forEach(function (btn) {
       btn.addEventListener("click", function () {
+        if (btn.disabled) return;
+        btn.disabled = true; // P11: no double-tap
         var rewardId = btn.dataset.reward;
         var requestId = "q_" + Date.now() + "_" + Math.floor(Math.random() * 1e6);
         save(function (s) { MathCore.Economy.requestReward(s, rewardId, requestId, Date.now()); }).then(function (result) {
@@ -1165,7 +1316,7 @@
       state.economy.rewards
         .map(function (r) {
           return (
-            '<div class="reward-item"><span>' + escapeHtml(r.name) + " — " + r.cost + " 🪙" + (r.active ? "" : " (הוסר)") + "</span>" +
+            '<div class="reward-item"><span>' + escapeHtml(r.name) + " — " + r.cost + " 🪙" + (r.active ? "" : T.parent.removedSuffix) + "</span>" +
             (r.active ? '<button class="secondary" data-deactivate-reward="' + r.id + '">' + T.parent.deactivateBtn + "</button>" : "") +
             "</div>"
           );
@@ -1296,10 +1447,10 @@
     var overallAccuracy = totalAttempts ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
     var trends = MathCore.Stats.trends(state, 30);
-    var chart1 = lineChartSvg(trends.accuracy.map(function (v) { return v * 100; }), { format: function (v, i) { return "סבב " + (i + 1) + ": " + Math.round(v) + "%"; } });
-    var chart2 = lineChartSvg(trends.avgMs.map(function (v) { return v / 1000; }), { format: function (v, i) { return "סבב " + (i + 1) + ": " + v.toFixed(1) + "s"; } });
-    var chart3 = lineChartSvg(trends.masteredCount, { format: function (v, i) { return "סבב " + (i + 1) + ": " + v; } });
-    var chart4 = lineChartSvg(trends.coins, { format: function (v, i) { return "סבב " + (i + 1) + ": " + v + " 🪙"; } });
+    var chart1 = lineChartSvg(trends.accuracy.map(function (v) { return v * 100; }), { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + Math.round(v) + "%"; } });
+    var chart2 = lineChartSvg(trends.avgMs.map(function (v) { return v / 1000; }), { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v.toFixed(1) + "s"; } });
+    var chart3 = lineChartSvg(trends.masteredCount, { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v; } });
+    var chart4 = lineChartSvg(trends.coins, { format: function (v, i) { return T.parent.sessionLabel(i + 1) + ": " + v + " 🪙"; } });
 
     var heatmapGrid = MathCore.Stats.heatmap(state);
     var heatmapHtml =
@@ -1308,7 +1459,8 @@
         .map(function (row) {
           return row
             .map(function (cell) {
-              return '<div title="' + cell.key.replace("x", "×") + " (" + cell.mastery + ')" style="aspect-ratio:1;border-radius:4px;background:' + heatmapCellColor(cell) + '"></div>';
+              var cp = MathCore.Facts.parts(cell.key);
+              return '<div title="' + T.parent.heatmapTooltip(cp[0], cp[1], T.parent.masteryNames[cell.mastery] || cell.mastery) + '" style="aspect-ratio:1;border-radius:4px;background:' + heatmapCellColor(cell) + '"></div>';
             })
             .join("");
         })
@@ -1326,7 +1478,7 @@
           })
           .join("") +
         "</ul>"
-      : '<p class="muted">אין עדיין נתונים</p>';
+      : '<p class="muted">' + T.parent.noDataYet + "</p>";
 
     var historyRows = state.sessions.slice(-20).reverse();
     var historyHtml =
@@ -1338,7 +1490,7 @@
               return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
             })
             .join("")
-        : '<p class="muted">אין עדיין סבבים</p>');
+        : '<p class="muted">' + T.parent.noSessionsYet + "</p>");
 
     return (
       '<div class="card" style="margin-bottom:1rem">' +
@@ -1412,12 +1564,12 @@
         try {
           raw = JSON.parse(text);
         } catch (e) {
-          document.getElementById("data-section-msg").textContent = "קובץ לא תקין";
+          document.getElementById("data-section-msg").textContent = T.parent.invalidFile;
           return;
         }
         var validation = MathCore.Migrate.validateImport(raw);
         if (!validation.ok) {
-          document.getElementById("data-section-msg").textContent = "קובץ לא תקין: " + validation.problems.join(", ");
+          document.getElementById("data-section-msg").textContent = T.parent.invalidFile + ": " + validation.problems.join(", ");
           return;
         }
         showImportPreview(raw, text);
@@ -1449,7 +1601,7 @@
     area.innerHTML =
       '<div class="card">' +
       "<h3>" + T.parent.importPreviewTitle + "</h3>" +
-      "<p>" + sessionsCount + " סבבים, " + lifetimeCoins + " מטבעות, ייצוא מ-" + exportDate + "</p>" +
+      "<p>" + T.parent.importSummary(sessionsCount, lifetimeCoins, exportDate) + "</p>" +
       warning +
       '<input id="import-pin" type="password" inputmode="numeric" maxlength="4" placeholder="' + T.parent.importPinPrompt + '" /><br><br>' +
       '<button data-action="confirm-import">' + T.parent.importConfirmBtn + "</button> " +
@@ -1464,7 +1616,7 @@
           if (result.ok) {
             renderParentDashboard();
           } else {
-            document.getElementById("import-error").textContent = (result.problems || [result.error || "שגיאה"]).join(", ");
+            document.getElementById("import-error").textContent = (result.problems || [result.error || T.parent.genericError]).join(", ");
           }
         });
       });
@@ -1553,6 +1705,7 @@
       }
     });
 
+    document.querySelector('[data-action="reload-for-update"]').textContent = T.misc.reloadBtn;
     document.querySelector('[data-action="reload-for-update"]').addEventListener("click", function () {
       location.reload();
     });
