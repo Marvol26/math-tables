@@ -1372,6 +1372,15 @@
   // numpad/keyboard input exactly as before (WP-F3: one shared submit path).
   function submitAnswer(value) {
     if (App.feedbackLock) return;
+    // A leftover falling bubble from the PREVIOUS question stays in the DOM
+    // (paused, not removed) while the next question's paint save is still
+    // in flight — a tap in that window must be a no-op, not a submit against
+    // a `current` that no longer exists (SessionCore.submit would throw,
+    // which rejects the save() promise and, without this guard, could strand
+    // feedbackLock forever). This also guards the pre-existing typed-mode
+    // "stale Enter" case for free (WP-F8 gate review, MEDIUM).
+    var stateNow = S();
+    if (!stateNow.active || !stateNow.active.current) return;
     if (value === undefined) {
       var input = document.getElementById("answer-input");
       value = input.tagName === "INPUT" && input.value !== undefined && !input.readOnly ? input.value : questionInput;
@@ -1381,10 +1390,12 @@
     clearInterval(challengeTimerHandle);
     document.querySelectorAll(".bubble").forEach(function (b) { b.style.animationPlayState = "paused"; });
     var submitResult = null;
-    save(function (s) { submitResult = MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); }).then(function (result) {
-      if (!result.ok) { App.feedbackLock = false; return; } // stale/error already surfaced via banner/stale card
-      showFeedback(submitResult);
-    });
+    save(function (s) { submitResult = MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); })
+      .then(function (result) {
+        if (!result.ok) { App.feedbackLock = false; return; } // stale/error already surfaced via banner/stale card
+        showFeedback(submitResult);
+      })
+      .catch(function () { App.feedbackLock = false; }); // a rejected save must never strand the lock
   }
 
   function showFeedback(result) {

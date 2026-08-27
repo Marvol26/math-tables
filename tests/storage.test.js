@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { IDBFactory } = require("fake-indexeddb");
-const { CONFIG, Migrate, Storage } = require("../core.js");
+const { CONFIG, Migrate, Storage, SessionCore } = require("../core.js");
 
 function makeLocalStorage() {
   const data = {};
@@ -324,4 +324,34 @@ test("[lastgood] restoreLastGood opens IDB itself when the window has no db yet,
   const bad = await c.restoreLastGood(300);
   assert.equal(bad.ok, false);
   assert.match(bad.error, /newer/);
+});
+
+// WP-F8 gate review (fresh Fable 5, MEDIUM): a mutator that throws (e.g.
+// SessionCore.submit called with no active.current — the "stale falling
+// bubble tapped after the next question already painted" race) makes
+// save()'s returned promise REJECT, not resolve {ok:false}. A caller that
+// only attaches .then(onFulfilled) with no rejection handler (as
+// index.html's submitAnswer did before this fix) can strand feedbackLock
+// forever and leave an unhandled rejection. index.html's submitAnswer now
+// guards against calling submit with no current question AND catches a
+// rejected save as defense in depth — this test documents and locks in the
+// exact mechanism both defenses rely on.
+test("save() REJECTS (does not resolve ok:false) when the mutator throws", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "d9" });
+  await storage.load();
+  storage.state = seedState();
+  await assert.rejects(
+    storage.save(() => { throw new Error("boom"); }, 100),
+    /boom/
+  );
+  // the queue must still be usable after a thrown mutator (no permanently stuck state)
+  await storage.save((s) => { s.settings.sound = false; }, 200);
+  assert.equal(storage.state.settings.sound, false);
+});
+
+test("SessionCore.submit throws when there is no current question — the exact throw a stale UI tap would trigger", () => {
+  const state = Migrate.emptyState();
+  state.active = { id: "s1", planned: [], queue: [], retryQueue: [], attempts: [], current: null, mode: "falling", settingsSnapshot: { challengeOn: true, timeLimitSec: 8 } };
+  assert.throws(() => SessionCore.submit(state, 42, Date.now(), {}), /no current question to submit/);
 });

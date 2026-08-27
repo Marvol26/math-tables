@@ -151,3 +151,9 @@ partially verified — 6-lane bubble fit was confirmed comfortably at ~500px
 width, but the smallest-width and landscape cases are not yet pixel-checked.
 WP-F5 (live verification) should re-attempt with device emulation or a real
 device if this tool limitation persists.
+
+## Falling numbers — WP-F8 closing review LOWs (2026-08-27, not fixed, recorded per reviewer)
+- **LOW — no bubble wobble, bubbles below 64px on small screens.** F8 says bubbles "wobble slightly" and are "≥ 64 px" — no wobble animation exists, and bubbles shrink to 56px (≤380px width) / 48px (short landscape). Touch targets stay ≥44px so usability is fine; this is a spec-literalness gap, Marat's call whether to add wobble/enforce 64px minimum.
+- **LOW — 6-bubble layout at 320px width: bubbles can overlap by a few px per side**, since 6 lanes at ~50px each hold 56px bubbles. An edge tap in the overlap zone could hit the neighbouring bubble. Combined with the already-recorded unverified small-viewport check (WP-F3 entry above) — both point at the same residual: pixel-verify 320px-wide + 6-option layouts on a real device or working device emulation.
+- **LOW — "עוד סבב!" on a falling summary always starts a typed session**, not another falling round. Design-conformant (FALLING-DESIGN §4 says "Summary: unchanged") but possibly not what a child who just finished a balloon round expects. Marat's call whether "עוד סבב!" should be mode-aware.
+- **LOW — backgrounding mid-fall (visibilitychange) gives no visual cue that the ×2 window is gone.** `markInterrupted` fires but the falling screen isn't re-rendered until the child returns, so bubbles keep visually falling with no "ממשיכות בלי שעון" label until the next paint. Same behavior class as typed mode's existing turtle-timer handling; not falling-specific, noted for completeness only.

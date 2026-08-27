@@ -95,25 +95,52 @@ test("falling: every attempt is tagged mode:'falling', typed sessions default to
   assert.ok(Object.keys(typedState.facts).length > 0); // typed mode does update facts
 });
 
-test("falling: a station that would be reached by coincidence is NOT reached in falling mode", () => {
+// A masteredFact helper builder so both the mastered-facts fixture and the
+// positive control below share one definition.
+function masteredFact(key) {
+  return {
+    attempts: 3,
+    correct: 3,
+    lastSeen: 500,
+    recent: [
+      { ok: true, ms: 100, asked: key, t: 100, withinLimit: false, interrupted: false },
+      { ok: true, ms: 100, asked: key, t: 200, withinLimit: false, interrupted: false },
+      { ok: true, ms: 100, asked: key, t: 300, withinLimit: false, interrupted: false },
+    ],
+  };
+}
+
+// WP-F8 gate review (fresh Fable 5, MEDIUM): the original version of this test
+// pre-seeded only 9/10 mastered facts, so Map.newlyReached() could never
+// return a station regardless of whether the finish() map guard exists —
+// falling sessions never advance facts, so progress stays at 9 either way. A
+// mutation test (deleting the `if (!isFalling)` map guard in SessionCore.finish)
+// still passed the old test. Fixed: seed exactly 10/10 mastered facts (the
+// station WOULD be reached this instant if the guard were removed) and add a
+// same-state positive control proving a typed session on the identical
+// fixture DOES mark it reached — so the fixture is proven capable of
+// triggering the map, making the falling-mode assertion meaningful.
+test("falling: a station that would be reached this session is NOT reached in falling mode (map guard)", () => {
   const state = freshState();
-  // Pre-seed 9/10 mastered facts of table ×1 (MAP_PATH's first station) so one
-  // more mastered fact of ×1 would normally reach the station.
-  for (let i = 1; i <= 9; i++) {
-    const key = Facts.key(1, i);
-    state.facts[key] = {
-      attempts: 3,
-      correct: 3,
-      lastSeen: 500,
-      recent: [
-        { ok: true, ms: 100, asked: key, t: 100, withinLimit: false, interrupted: false },
-        { ok: true, ms: 100, asked: key, t: 200, withinLimit: false, interrupted: false },
-        { ok: true, ms: 100, asked: key, t: 300, withinLimit: false, interrupted: false },
-      ],
-    };
+  for (let i = 1; i <= 10; i++) {
+    state.facts[Facts.key(1, i)] = masteredFact(Facts.key(1, i));
   }
-  assert.equal(MapCore.progress(state, 1), 9);
+  assert.equal(MapCore.progress(state, 1), 10);
+  assert.equal(MapCore.isReached(state, 1), false);
+
   const session = playSession(state, seededRng(6), 1000, { mode: "falling" }, 0);
   assert.equal(session.stationsReached.length, 0);
   assert.equal(MapCore.isReached(state, 1), false);
+});
+
+test("falling: positive control — the same 10/10-mastered fixture IS reached by a typed session", () => {
+  const state = freshState();
+  for (let i = 1; i <= 10; i++) {
+    state.facts[Facts.key(1, i)] = masteredFact(Facts.key(1, i));
+  }
+  assert.equal(MapCore.isReached(state, 1), false);
+
+  const session = playSession(state, seededRng(6), 1000, undefined, 0);
+  assert.deepEqual(session.stationsReached, [1]);
+  assert.equal(MapCore.isReached(state, 1), true);
 });
