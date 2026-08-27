@@ -1002,8 +1002,15 @@
     trends: function (state, n) {
       var sessions = state.sessions.slice(-n);
       // Falling mode is recognition, not recall (F4/I-F1): it never moves
-      // accuracy/speed/mastery trends, but it does still earn coins.
-      var learningSessions = sessions.filter(function (s) { return (s.mode || "typed") !== "falling"; });
+      // accuracy/speed/mastery trends, but it does still earn coins. Filter
+      // BEFORE windowing (not after) — a run of falling sessions must not
+      // push typed history out of the learning-trend window (WP-F1 gate
+      // review, MEDIUM: a child who prefers falling would otherwise see
+      // blank accuracy/speed/mastery charts once 30 falling sessions in a
+      // row outrun the window, even though real typed history exists).
+      var learningSessions = state.sessions
+        .filter(function (s) { return (s.mode || "typed") !== "falling"; })
+        .slice(-n);
       return {
         accuracy: learningSessions.map(function (s) {
           return s.planned.length ? s.firstTryCorrect / s.planned.length : 0;

@@ -95,3 +95,36 @@ test("Stats.trends: a falling session moves coins but not accuracy/avgMs/mastere
   assert.equal(trends.coins.length, 2); // both sessions
   assert.deepEqual(trends.coins, [3, 99]);
 });
+
+// WP-F1 gate review (fresh Fable 5, MEDIUM): filtering falling sessions AFTER
+// windowing to the last n lets a run of falling sessions push real typed
+// history out of the accuracy/avgMs/masteredCount trend window entirely,
+// even though the app default (window 30) makes this the expected shape for
+// a child who prefers the balloon game. Filter before windowing instead.
+test("Stats.trends: a long run of falling sessions does not starve the learning-trend window", () => {
+  const typedSession = {
+    mode: "typed",
+    planned: ["1x1"],
+    firstTryCorrect: 1,
+    coinsEarned: 1,
+    masteredAfter: 3,
+    attempts: [{ retry: false, interrupted: false, ms: 1000 }],
+  };
+  const fallingSession = {
+    mode: "falling",
+    planned: ["2x2"],
+    firstTryCorrect: 1,
+    coinsEarned: 5,
+    masteredAfter: 3,
+    attempts: [{ retry: false, interrupted: false, ms: 300 }],
+  };
+  const sessions = [typedSession];
+  for (let i = 0; i < 30; i++) sessions.push(fallingSession);
+  const state = { sessions };
+
+  const trends = Stats.trends(state, 30);
+  assert.equal(trends.accuracy.length, 1, "the one typed session must still appear in the window");
+  assert.equal(trends.masteredCount.length, 1);
+  assert.equal(trends.avgMs.length, 1);
+  assert.equal(trends.coins.length, 30); // coins keeps the raw window (all-falling here)
+});

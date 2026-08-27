@@ -129,3 +129,16 @@ Marat's affirmative yes, not something the executor writes to `~/brain`.
 ## After the journey map (2026-08-27)
 - If the turtle visibly sits at 9/10 for weeks while stations ahead light up: consider relaxing mastery to "3 of the last 4 first attempts correct" (`Facts.mastery`, CONFIG) — the reviewer's simulation showed a flat-85% child stalling ~17 sessions at ×5. Not a selector issue.
 - Marat's device pass for 0.6.0: open המפה שלי, tap a station, finish a session that completes a table (banner + fireworks).
+
+## Falling numbers — design question for Marat (WP-F1 gate review, 2026-08-27)
+The fresh Fable 5 reviewer flagged a real but non-bug interaction, not covered
+by FALLING-DESIGN F1–F10: the once-per-day perfect bonus (+5) and the daily
+streak counter are shared across typed and falling sessions. A falling
+"perfect" (recognition, easier — a tap among 4-6 options) can consume the
+day's perfect bonus before a harder typed perfect that same day, which would
+then earn 0; and a day where the child only played falling still counts
+toward `dailyStreak`. Both are consistent with the letter of F4 ("coins/
+stickers apply" to falling) but the interaction was never explicitly decided.
+Not fixed — needs Marat's call: (a) leave as-is (simplest, and arguably fine —
+a bonus is a bonus), (b) give falling its own separate daily-perfect slot, or
+(c) exclude falling-only days from the streak. Left for a future session.
