@@ -72,6 +72,17 @@
     STATION_REQUIRED: 10, // mastered facts of the table needed to reach its station
     MAP_FOCUS_BONUS: 1.5, // added to the weakness score of the current station's facts
     ANIMATION_MAX_MS: 1800,
+
+    // Falling numbers mode (docs/FALLING-DESIGN.md, Marat 2026-08-27)
+    FALLING: {
+      DEFAULT_DURATION_SEC: 8,
+      MIN_DURATION_SEC: 3,
+      MAX_DURATION_SEC: 20,
+      DEFAULT_OPTIONS: 4,
+      MIN_OPTIONS: 4,
+      MAX_OPTIONS: 6,
+      FILL_WINDOW: 20,
+    },
   };
 
   // --------------------------------------------------------------------
@@ -531,24 +542,133 @@
   };
 
   // --------------------------------------------------------------------
+  // Falling — distractor generation for the falling-numbers mode
+  // (docs/FALLING-DESIGN.md F7). Pure, no DOM, no state mutation.
+  // --------------------------------------------------------------------
+  var Falling = {
+    // A single swap of two distinct digits of p (no leading zero); null if
+    // p has fewer than 2 digits or every swap collides back onto p.
+    digitSwap: function (p) {
+      var chars = String(p).split("");
+      for (var i = 0; i < chars.length; i++) {
+        for (var j = i + 1; j < chars.length; j++) {
+          if (chars[i] === chars[j]) continue;
+          var swapped = chars.slice();
+          var tmp = swapped[i];
+          swapped[i] = swapped[j];
+          swapped[j] = tmp;
+          if (swapped[0] === "0") continue;
+          var n = Number(swapped.join(""));
+          if (n !== p) return n;
+        }
+      }
+      return null;
+    },
+
+    // Every product a×b for facts other than (a,b) itself (both directions
+    // collapse to the same canonical fact, tried once).
+    otherFactProducts: function (a, b) {
+      var lo = Math.min(a, b);
+      var hi = Math.max(a, b);
+      var list = [];
+      for (var x = CONFIG.FACTS_MIN; x <= CONFIG.FACTS_MAX; x++) {
+        for (var y = x; y <= CONFIG.FACTS_MAX; y++) {
+          if (x === lo && y === hi) continue;
+          list.push(x * y);
+        }
+      }
+      return list;
+    },
+
+    // `count` unique wrong answers for a×b=p, priority-ordered per F7,
+    // always in 1…100 and never equal to p.
+    distractors: function (a, b, count, rng) {
+      var p = a * b;
+      var used = {};
+      used[p] = true;
+      var result = [];
+
+      function offer(n) {
+        if (n === null || n === undefined || !isFinite(n)) return;
+        n = Math.round(n);
+        if (n < 1 || n > 100) return;
+        if (used[n]) return;
+        used[n] = true;
+        result.push(n);
+      }
+
+      [
+        (a - 1) * b, (a + 1) * b, a * (b - 1), a * (b + 1), // same-table neighbours
+        p - a, p + a, p - b, p + b,
+        Falling.digitSwap(p),
+        a + b,
+        p - 10, p + 10,
+      ].forEach(offer);
+
+      if (result.length < count) {
+        var nearby = fisherYatesShuffle(
+          Falling.otherFactProducts(a, b).filter(function (n) {
+            return !used[n] && Math.abs(n - p) <= CONFIG.FALLING.FILL_WINDOW;
+          }),
+          rng
+        );
+        for (var i = 0; i < nearby.length && result.length < count; i++) offer(nearby[i]);
+      }
+
+      if (result.length < count) {
+        var universe = [];
+        for (var n2 = 1; n2 <= 100; n2++) if (!used[n2]) universe.push(n2);
+        universe = fisherYatesShuffle(universe, rng);
+        for (var j = 0; j < universe.length && result.length < count; j++) offer(universe[j]);
+      }
+
+      return result.slice(0, count);
+    },
+
+    // Shuffled candidate set of exactly `options` values containing a×b once.
+    candidates: function (a, b, options, rng) {
+      var p = a * b;
+      var wrong = Falling.distractors(a, b, options - 1, rng);
+      return fisherYatesShuffle(wrong.concat([p]), rng);
+    },
+  };
+
+  // --------------------------------------------------------------------
   // SessionCore — pure state transitions on state.active (DESIGN §6, §7)
   // --------------------------------------------------------------------
   var SessionCore = {
     // Creates state.active from a fresh plan. Mutates `state`, returns state.active.
-    start: function (state, rng, now) {
+    // `opts.mode` = "typed" (default) | "falling" (docs/FALLING-DESIGN.md).
+    start: function (state, rng, now, opts) {
       if (state.active) {
         var err = new Error("cannot start: a session is already active (state.active is set)");
         err.code = "ACTIVE_SESSION_EXISTS";
         throw err;
       }
+      var mode = opts && opts.mode === "falling" ? "falling" : "typed";
       var planned = Selector.plan(state, rng, now);
+      var falling = state.settings.falling || {};
+      // Falling mode's ×2 comes from the same withinLimit/timeLimitSec path as
+      // Challenge Mode (F9/I-F4) — no separate timing code in the UI layer.
+      var settingsSnapshot =
+        mode === "falling"
+          ? {
+              challengeOn: true,
+              timeLimitSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+              falling: {
+                durationSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+                options: falling.options || CONFIG.FALLING.DEFAULT_OPTIONS,
+              },
+            }
+          : {
+              challengeOn: !!state.settings.challengeOn,
+              timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+            };
       var active = {
         id: "s_" + now + "_" + Math.floor(rng() * 1e6),
         startedAt: now,
-        settingsSnapshot: {
-          challengeOn: !!state.settings.challengeOn,
-          timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
-        },
+        mode: mode,
+        settingsSnapshot: settingsSnapshot,
         planned: planned.slice(),
         queue: planned.slice(),
         retryQueue: [],
@@ -612,6 +732,7 @@
         retry: !!current.retry,
         withinLimit: withinLimit,
         interrupted: !!current.interrupted,
+        mode: active.mode || "typed",
         coins: 0,
         t: now,
       };
@@ -625,15 +746,19 @@
           retry: false,
           withinLimit: withinLimit,
         });
-        Facts.updateFromAttempt(state, current.key, {
-          ok: ok,
-          ms: ms,
-          asked: current.asked,
-          t: now,
-          withinLimit: withinLimit,
-          interrupted: !!current.interrupted,
-          retry: false,
-        });
+        // Falling mode is recognition, not recall (docs/FALLING-DESIGN.md F4/I-F1):
+        // it earns coins but never touches facts/mastery/carryover/map.
+        if (active.mode !== "falling") {
+          Facts.updateFromAttempt(state, current.key, {
+            ok: ok,
+            ms: ms,
+            asked: current.asked,
+            t: now,
+            withinLimit: withinLimit,
+            interrupted: !!current.interrupted,
+            retry: false,
+          });
+        }
       }
 
       active.attempts.push(attemptRecord);
@@ -753,26 +878,38 @@
       var unlocksEarned = Economy.newUnlocks(state);
       state.economy.unlocked = (state.economy.unlocked || []).concat(unlocksEarned);
 
+      var isFalling = active.mode === "falling";
+
       // Journey map: stations reached in this session are permanent (never fall).
-      if (!state.map) state.map = { reached: {} };
-      var stationsReached = Map.newlyReached(state);
-      stationsReached.forEach(function (n) { state.map.reached[n] = now; });
+      // Falling mode is recognition, not recall (F4/I-F1) — it never moves the map.
+      var stationsReached = [];
+      if (!isFalling) {
+        if (!state.map) state.map = { reached: {} };
+        stationsReached = Map.newlyReached(state);
+        stationsReached.forEach(function (n) { state.map.reached[n] = now; });
+      }
 
       var masteredAfter = Facts.allKeys().filter(function (k) {
         return Facts.mastery(Facts.getFact(state, k)) === "mastered";
       }).length;
 
-      var leftoverCarryover = (state.carryover || []).slice(CONFIG.SESSION_SIZE);
-      var nextCarryover = [];
-      misses.concat(leftoverCarryover).forEach(function (k) {
-        if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
-      });
+      // Falling mode never touches carryover (I-F1) — state.carryover stays
+      // exactly as it was when the session started.
+      var nextCarryover = state.carryover || [];
+      if (!isFalling) {
+        var leftoverCarryover = nextCarryover.slice(CONFIG.SESSION_SIZE);
+        nextCarryover = [];
+        misses.concat(leftoverCarryover).forEach(function (k) {
+          if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
+        });
+      }
 
       var session = {
         id: sid,
         startedAt: active.startedAt,
         endedAt: now,
         abandoned: false,
+        mode: active.mode || "typed",
         challengeOn: active.settingsSnapshot.challengeOn,
         timeLimitSec: active.settingsSnapshot.timeLimitSec,
         planned: active.planned.slice(),
@@ -864,12 +1001,15 @@
 
     trends: function (state, n) {
       var sessions = state.sessions.slice(-n);
+      // Falling mode is recognition, not recall (F4/I-F1): it never moves
+      // accuracy/speed/mastery trends, but it does still earn coins.
+      var learningSessions = sessions.filter(function (s) { return (s.mode || "typed") !== "falling"; });
       return {
-        accuracy: sessions.map(function (s) {
+        accuracy: learningSessions.map(function (s) {
           return s.planned.length ? s.firstTryCorrect / s.planned.length : 0;
         }),
-        avgMs: sessions.map(Stats.sessionAvgMs),
-        masteredCount: sessions.map(function (s) { return s.masteredAfter; }),
+        avgMs: learningSessions.map(Stats.sessionAvgMs),
+        masteredCount: learningSessions.map(function (s) { return s.masteredAfter; }),
         coins: sessions.map(function (s) { return s.coinsEarned; }),
       };
     },
@@ -955,6 +1095,8 @@
           forceNumpad: null,
           // Cloud backup (private GitHub Gist). Device-local: stripped from export, kept on import.
           cloud: { token: null, gistId: null, lastOkAt: null, lastError: null, restoreFromGistId: null },
+          // Falling numbers mode (docs/FALLING-DESIGN.md F2). Off by default.
+          falling: { enabled: false, durationSec: CONFIG.FALLING.DEFAULT_DURATION_SEC, options: CONFIG.FALLING.DEFAULT_OPTIONS },
         },
         economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
         facts: {},
@@ -1000,6 +1142,12 @@
             // a bigger backup found at connect time that was NOT adopted; restore prefers it
             restoreFromGistId: rs.cloud && typeof rs.cloud.restoreFromGistId === "string" ? rs.cloud.restoreFromGistId : null,
           },
+          // Falling numbers mode (F2). Additive since 2026-08-27; old backups default to off.
+          falling: {
+            enabled: !!(rs.falling && rs.falling.enabled),
+            durationSec: rs.falling && typeof rs.falling.durationSec === "number" ? rs.falling.durationSec : CONFIG.FALLING.DEFAULT_DURATION_SEC,
+            options: rs.falling && typeof rs.falling.options === "number" ? rs.falling.options : CONFIG.FALLING.DEFAULT_OPTIONS,
+          },
         },
         economy: {
           ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],
@@ -1008,7 +1156,12 @@
           requests: Array.isArray(re.requests) ? JSON.parse(JSON.stringify(re.requests)) : [],
         },
         facts: raw.facts ? JSON.parse(JSON.stringify(raw.facts)) : {},
-        sessions: Array.isArray(raw.sessions) ? JSON.parse(JSON.stringify(raw.sessions)) : [],
+        sessions: Array.isArray(raw.sessions)
+          ? JSON.parse(JSON.stringify(raw.sessions)).map(function (s) {
+              s.mode = s.mode === "falling" ? "falling" : "typed";
+              return s;
+            })
+          : [],
         carryover: Array.isArray(raw.carryover) ? raw.carryover.slice() : [],
         active: raw.active ? JSON.parse(JSON.stringify(raw.active)) : null,
         // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
@@ -1018,6 +1171,9 @@
       // as a lifecycle interruption (DESIGN §6/§7, R2 #5, R3 #2).
       if (state.active && state.active.current) {
         state.active.current.interrupted = true;
+      }
+      if (state.active) {
+        state.active.mode = state.active.mode === "falling" ? "falling" : "typed";
       }
       return state;
     },
@@ -1112,6 +1268,19 @@
       }
       if (raw.settings !== undefined && (typeof raw.settings !== "object" || raw.settings === null)) {
         problems.push("settings must be an object");
+      } else if (raw.settings && raw.settings.falling !== undefined) {
+        var rf = raw.settings.falling;
+        if (!rf || typeof rf !== "object" || Array.isArray(rf)) {
+          problems.push("settings.falling must be an object");
+        } else {
+          if (rf.enabled !== undefined && typeof rf.enabled !== "boolean") problems.push("settings.falling.enabled must be a boolean");
+          if (rf.durationSec !== undefined && (typeof rf.durationSec !== "number" || rf.durationSec < CONFIG.FALLING.MIN_DURATION_SEC || rf.durationSec > CONFIG.FALLING.MAX_DURATION_SEC)) {
+            problems.push("settings.falling.durationSec out of range");
+          }
+          if (rf.options !== undefined && (typeof rf.options !== "number" || rf.options < CONFIG.FALLING.MIN_OPTIONS || rf.options > CONFIG.FALLING.MAX_OPTIONS)) {
+            problems.push("settings.falling.options out of range");
+          }
+        }
       }
       if (raw.carryover !== undefined && !Array.isArray(raw.carryover)) {
         problems.push("carryover must be an array");
@@ -1670,6 +1839,7 @@
     Economy: Economy,
     Selector: Selector,
     Map: Map,
+    Falling: Falling,
     Cloud: Cloud,
     SessionCore: SessionCore,
     Storage: Storage,

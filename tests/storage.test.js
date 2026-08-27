@@ -136,7 +136,7 @@ test("importJson keeps the device's own pinHash even though the imported blob ha
   assert.equal(result.ok, true);
   assert.equal(storage.state.settings.pinHash, devicePinHash);
   assert.equal(storage.state.settings.childName, "ילד אחר");
-  assert.deepEqual(storage.state.sessions, [{ id: "s_foreign", planned: ["6x7"], firstTryCorrect: 1, coinsEarned: 5, masteredAfter: 0 }]);
+  assert.deepEqual(storage.state.sessions, [{ id: "s_foreign", planned: ["6x7"], firstTryCorrect: 1, coinsEarned: 5, masteredAfter: 0, mode: "typed" }]);
 });
 
 test("[WP9 finding C] exportJson strips settings.pinHash/recoveryHash from the serialized backup but not from live state", async () => {
