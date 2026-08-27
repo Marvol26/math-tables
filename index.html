@@ -1106,7 +1106,7 @@
   // ×9 = ×10 − one, ×5 = half of ×10, ×6/×7 built from ×5). Picks the operand
   // with the most useful trick. Numbers only — no user input.
   function strategyHint(a, b) {
-    var order = [10, 9, 5, 2, 4, 8, 3, 6, 7, 1];
+    var order = [1, 10, 9, 5, 2, 4, 8, 3, 6, 7]; // ×1 first: "anything × 1 stays" beats any other trick
     var n = null, m = null;
     for (var i = 0; i < order.length; i++) {
       if (a === order[i]) { n = a; m = b; break; }
@@ -1125,7 +1125,7 @@
       case 3: return eq("2 × " + m + " + " + m + " = " + (2 * m) + " + " + m + " = " + p);
       case 6: return eq("5 × " + m + " + " + m + " = " + (5 * m) + " + " + m + " = " + p);
       case 7: return eq("5 × " + m + " + 2 × " + m + " = " + (5 * m) + " + " + (2 * m) + " = " + p);
-      default: return eq("1 × " + m + " = " + m);
+      default: return eq(m + " × 1 = " + m) + " — כפול 1 נשאר אותו מספר";
     }
   }
 
