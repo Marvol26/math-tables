@@ -168,6 +168,35 @@
     [data-screen="question"] .turtle-track { width: min(260px, 38vw); height: 36px; }
     [data-screen="question"] .dot-array { --dot: 7px; gap: 2px; }
   }
+  /* Falling numbers mode (docs/FALLING-DESIGN.md) */
+  .lanes { position: relative; width: min(480px, 94vw); height: clamp(220px, 42vh, 420px); display: flex; direction: ltr; unicode-bidi: isolate; }
+  .lane { flex: 1; position: relative; height: 100%; }
+  .bubble {
+    position: absolute; top: -70px; left: 50%; transform: translateX(-50%);
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-weight: bold; font-size: 1.2rem;
+    display: flex; align-items: center; justify-content: center;
+    border: none; cursor: pointer; padding: 0; box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+    animation: bubble-fall var(--fall, 8s) linear forwards;
+  }
+  @keyframes bubble-fall { from { top: -70px; } to { top: calc(100% - 64px); } }
+  /* Applied at render (interrupted resume / reduced motion) OR after animationend
+     fires naturally — either way the bubble must sit at the bottom immediately,
+     never mid-fall (docs/FALLING-DESIGN.md F10: a resumed question renders
+     "already landed", not replaying the fall). */
+  .bubble.landed { animation: none; top: calc(100% - 64px); box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+  .falling-landed-label { min-height: 1.2em; }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble { animation: none; top: calc(100% - 64px); }
+  }
+  @media (max-width: 380px) {
+    .bubble { width: 56px; height: 56px; font-size: 1.05rem; }
+  }
+  @media (max-height: 420px) and (min-width: 480px) {
+    [data-screen="question"][data-falling="1"] { flex-direction: column; }
+    [data-screen="question"][data-falling="1"] .lanes { height: clamp(140px, 32vh, 260px); width: min(420px, 70vw); }
+    [data-screen="question"][data-falling="1"] .bubble { width: 48px; height: 48px; font-size: 0.95rem; }
+  }
   #stale-card {
     display: none;
     position: fixed;
@@ -278,6 +307,7 @@
       interruptedLabel: "ממשיכות בלי שעון",
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
+      fallingLandedLabel: "נחתו! אפשר לבחור בנחת 🙂",
       exitButton: "✕",
       exitBottom: "יציאה — ההתקדמות נשמרת",
       continueBtn: "הבנתי, ממשיכות ✓",
@@ -714,6 +744,7 @@
   function route() {
     clearInterval(challengeTimerHandle); // never leave a challenge timer running behind a navigated-away screen
     clearTimeout(App.feedbackTimer); // P9: a pending answer-feedback timer must not paint a question over another screen
+    clearFallingKeyHandler(); // never leave a falling-mode document keydown listener behind a navigated-away screen
     App.pendingContinue = null;
     App.feedbackLock = false;
     var layers = document.querySelectorAll(".confetti-layer, .fireworks");
@@ -980,17 +1011,27 @@
       // covering every such path in one place, not just the button
       // (WP9 review finding B: the button-only fix left back-gesture/hash
       // exits still poisoning mastery/median stats with the stale shownAt).
-      if (state.active.current.interrupted) { renderQuestion(); return; }
-      save(function (s) { MathCore.SessionCore.markInterrupted(s); }).then(function () { renderQuestion(); });
+      if (state.active.current.interrupted) { renderCurrentQuestion(); return; }
+      save(function (s) { MathCore.SessionCore.markInterrupted(s); }).then(function () { renderCurrentQuestion(); });
       return;
     }
     nextFrame(function () {
       var paintedResult = null;
       save(function (s) { paintedResult = MathCore.SessionCore.paint(s, Date.now()); }).then(function (result) {
         if (!result.ok) return; // stale/error already surfaced via banner/stale card
-        if (!paintedResult) { finishSession(); } else { renderQuestion(); }
+        if (!paintedResult) { finishSession(); } else { renderCurrentQuestion(); }
       });
     });
+  }
+
+  // Screens.question dispatches on active.mode (docs/FALLING-DESIGN.md F1-F10):
+  // typed keeps the existing renderQuestion; falling gets renderFallingQuestion.
+  // Everything upstream of this call (paintNextQuestion, SessionCore.paint/
+  // submit/finish, showFeedback, finishSession) is shared between both modes.
+  function renderCurrentQuestion() {
+    var state = S();
+    if (state.active && state.active.mode === "falling") renderFallingQuestion();
+    else renderQuestion();
   }
 
   function renderQuestion() {
@@ -1065,6 +1106,128 @@
     }
 
     if (challengeOn) startChallengeTimer(active.settingsSnapshot.timeLimitSec);
+  }
+
+  // ------------------------------------------------------------------
+  // Screen: Falling question (docs/FALLING-DESIGN.md) — shares dots/coin
+  // badge/exit buttons/paintNextQuestion/submitAnswer(value)/showFeedback/
+  // finishSession with the typed screen; only the candidate layout differs.
+  // ------------------------------------------------------------------
+  var fallingKeyHandler = null;
+
+  function clearFallingKeyHandler() {
+    if (fallingKeyHandler) {
+      document.removeEventListener("keydown", fallingKeyHandler);
+      fallingKeyHandler = null;
+    }
+  }
+
+  // A tiny seeded PRNG (mulberry32) so the candidate set for a given question
+  // is stable across re-renders of the SAME `current` (e.g. the interrupted-
+  // resume short-circuit in paintNextQuestion calling renderCurrentQuestion
+  // again) without needing core.js to persist candidates on state.active.
+  function seededRngFromString(str) {
+    var seed = 0;
+    for (var i = 0; i < str.length; i++) seed = (Math.imul(seed, 31) + str.charCodeAt(i)) | 0;
+    return function () {
+      seed |= 0;
+      seed = (seed + 0x6d2b79f5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function renderFallingQuestion() {
+    var state = S();
+    var active = state.active;
+    var current = active.current;
+    if (!current) return;
+    clearFallingKeyHandler();
+
+    var parts = MathCore.Facts.parts(current.asked);
+    var retrySet = {};
+    active.retryQueue.forEach(function (asked) { retrySet[asked] = true; });
+    var resolvedSet = {};
+    active.attempts.forEach(function (a) { if (a.ok) resolvedSet[a.asked] = true; });
+    var dotsHtml = active.planned.map(function (asked) {
+      var cls = "dot";
+      if (retrySet[asked]) cls = "dot retry";
+      else if (resolvedSet[asked]) cls = "dot done";
+      return '<span class="' + cls + '"></span>';
+    }).join("");
+    var doneOrRetryCount = active.planned.filter(function (asked) { return resolvedSet[asked] || retrySet[asked]; }).length;
+    var value = MathCore.Facts.value(state, current.key);
+
+    var fallingSnapshot = active.settingsSnapshot.falling || {};
+    var options = fallingSnapshot.options || CONFIG.FALLING.DEFAULT_OPTIONS;
+    var durationSec = fallingSnapshot.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC;
+    var rng = seededRngFromString(active.id + ":" + current.asked + ":" + current.shownAt);
+    var candidateValues = MathCore.Falling.candidates(parts[0], parts[1], options, rng);
+
+    var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var visuallyLanded = !!current.interrupted || reducedMotion;
+
+    var bubblesHtml = candidateValues.map(function (v, i) {
+      // `v` is always a number from MathCore.Falling.candidates, never user input.
+      return (
+        '<div class="lane"><button class="bubble' + (visuallyLanded ? " landed" : "") + '" data-value="' + Number(v) + '" data-lane="' + i + '">' +
+        Number(v) +
+        "</button></div>"
+      );
+    }).join("");
+
+    render(
+      '<div class="screen" data-screen="question" data-falling="1" style="--fall:' + durationSec + 's">' +
+        '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem">' + T.question.exitButton + "</button>" +
+        '<div class="question-info">' +
+        '<div class="dots">' + dotsHtml + "</div>" +
+        '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
+        (current.interrupted ? '<div class="muted">' + T.question.interruptedLabel + "</div>" : "") +
+        '<div class="coin-pill">' + T.question.equalsCoin(value) + "</div>" +
+        '<div class="equation ltr" id="equation">' +
+        "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span>" +
+        "</div>" +
+        "</div>" +
+        '<div class="lanes">' + bubblesHtml + "</div>" +
+        '<div class="muted falling-landed-label" id="falling-landed-label">' + (visuallyLanded ? T.question.fallingLandedLabel : "") + "</div>" +
+        '<button class="ghost" data-action="exit-bottom">' + T.question.exitBottom + "</button>" +
+        "</div>"
+    );
+
+    bindAction("exit", onExitClick);
+    bindAction("exit-bottom", onExitClick);
+
+    var bubbleEls = document.querySelectorAll(".bubble");
+    bubbleEls.forEach(function (btn) {
+      if (!visuallyLanded) {
+        btn.addEventListener("animationend", function () {
+          btn.classList.add("landed");
+          var allLanded = Array.prototype.every.call(document.querySelectorAll(".bubble"), function (b) { return b.classList.contains("landed"); });
+          if (allLanded) {
+            var lbl = document.getElementById("falling-landed-label");
+            if (lbl) lbl.textContent = T.question.fallingLandedLabel;
+          }
+        });
+      }
+      btn.addEventListener("click", function () {
+        if (App.feedbackLock) return;
+        submitAnswer(Number(btn.dataset.value));
+      });
+    });
+
+    // Keyboard path (Mac): keys 1..N pick the bubble in that lane, left→right
+    // (the lanes container is forced `direction:ltr`, so DOM order === visual
+    // left→right order regardless of the page's own RTL direction).
+    fallingKeyHandler = function (ev) {
+      if (App.feedbackLock) return;
+      if (document.querySelector('[data-action="exit-yes"]')) return; // exit-confirm overlay is open
+      var n = Number(ev.key);
+      if (!n || n < 1 || n > options) return;
+      var btn = document.querySelector('.bubble[data-lane="' + (n - 1) + '"]');
+      if (btn) submitAnswer(Number(btn.dataset.value));
+    };
+    document.addEventListener("keydown", fallingKeyHandler);
   }
 
   function renderNumpad() {
@@ -1204,13 +1367,19 @@
     );
   }
 
-  function submitAnswer() {
+  // `value` is passed directly by the falling screen (the tapped bubble's
+  // number); the typed screen calls this with no argument and it reads the
+  // numpad/keyboard input exactly as before (WP-F3: one shared submit path).
+  function submitAnswer(value) {
     if (App.feedbackLock) return;
-    var input = document.getElementById("answer-input");
-    var value = input.tagName === "INPUT" && input.value !== undefined && !input.readOnly ? input.value : questionInput;
-    if (value === "" || value == null) value = questionInput;
+    if (value === undefined) {
+      var input = document.getElementById("answer-input");
+      value = input.tagName === "INPUT" && input.value !== undefined && !input.readOnly ? input.value : questionInput;
+      if (value === "" || value == null) value = questionInput;
+    }
     App.feedbackLock = true;
     clearInterval(challengeTimerHandle);
+    document.querySelectorAll(".bubble").forEach(function (b) { b.style.animationPlayState = "paused"; });
     var submitResult = null;
     save(function (s) { submitResult = MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); }).then(function (result) {
       if (!result.ok) { App.feedbackLock = false; return; } // stale/error already surfaced via banner/stale card
@@ -1350,11 +1519,12 @@
 
   function renderSummary(session) {
     var stars = session.firstTryCorrect === session.planned.length ? 3 : session.firstTryCorrect >= 8 ? 2 : 1;
+    var fallingSuffix = session.mode === "falling" ? " 🎈" : "";
     var titleHtml = session.perfect
-      ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + "</h1><p>" + T.summary.perfectSub + "</p>"
+      ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + fallingSuffix + "</h1><p>" + T.summary.perfectSub + "</p>"
       : session.firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT
-        ? "<h1>" + T.summary.nearPerfectTitle + "</h1>"
-        : "<h1>" + T.summary.encouragingTitle + "</h1>";
+        ? "<h1>" + T.summary.nearPerfectTitle + fallingSuffix + "</h1>"
+        : "<h1>" + T.summary.encouragingTitle + fallingSuffix + "</h1>";
     var learnedList = session.misses.length
       ? "<p>" + T.summary.learnedToday + ": " + session.misses.map(function (key) {
           var p = MathCore.Facts.parts(key); // P5: canonical key -> "a × b = product"
@@ -1945,7 +2115,8 @@
         ? historyRows
             .map(function (sess) {
               var dateStr = new Date(sess.endedAt).toLocaleDateString("he-IL");
-              return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
+              var fallingMark = sess.mode === "falling" ? " 🎈" : "";
+              return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + fallingMark + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
             })
             .join("")
         : '<p class="muted">' + T.parent.noSessionsYet + "</p>");
