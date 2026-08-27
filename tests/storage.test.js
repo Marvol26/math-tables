@@ -276,3 +276,18 @@ test("[lastgood] a state with more sessions advances the snapshot", async () => 
   await a.save((s) => { s.sessions.push({ id: "s_x", startedAt: 9, endedAt: 10, planned: ["1x2"], attempts: [], firstTryCorrect: 1, totalMs: 1, misses: [], coinsEarned: 1, perfect: false, masteredAfter: 0, unlocksEarned: [] }); }, 200);
   assert.equal(a.readLastGood().state.sessions.length, 3);
 });
+
+test("[cloud] serializeForExport strips token material; importJson keeps the device's cloud settings", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d6" });
+  await a.load();
+  a.state = stateWithSessions(1);
+  a.state.settings.cloud = { token: "secret", gistId: "g", lastOkAt: 1, lastError: null };
+  await a.save((s) => {}, 100);
+  const json = a.serializeForExport();
+  assert.ok(!json.includes("secret") && !json.includes("pinHash"));
+  const foreign = Migrate.emptyState(); foreign.settings.cloud = { token: "theirs", gistId: "x", lastOkAt: 2, lastError: null };
+  const r = await a.importJson(JSON.stringify(foreign), 200);
+  assert.equal(r.ok, true);
+  assert.equal(a.state.settings.cloud.token, "secret");
+});

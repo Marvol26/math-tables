@@ -953,6 +953,8 @@
           pinHash: null,
           recoveryHash: null,
           forceNumpad: null,
+          // Cloud backup (private GitHub Gist). Device-local: stripped from export, kept on import.
+          cloud: { token: null, gistId: null, lastOkAt: null, lastError: null },
         },
         economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
         facts: {},
@@ -990,6 +992,12 @@
           // null = auto-detect by pointer type; true/false = explicit override
           // from the question screen's "הצג מקלדת" toggle (DESIGN §9.2).
           forceNumpad: typeof rs.forceNumpad === "boolean" ? rs.forceNumpad : null,
+          cloud: {
+            token: rs.cloud && typeof rs.cloud.token === "string" ? rs.cloud.token : null,
+            gistId: rs.cloud && typeof rs.cloud.gistId === "string" ? rs.cloud.gistId : null,
+            lastOkAt: rs.cloud && typeof rs.cloud.lastOkAt === "number" ? rs.cloud.lastOkAt : null,
+            lastError: rs.cloud && typeof rs.cloud.lastError === "string" ? rs.cloud.lastError : null,
+          },
         },
         economy: {
           ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],
@@ -1499,7 +1507,86 @@
     var imported = Migrate.forImport(raw);
     imported.settings.pinHash = self.state ? self.state.settings.pinHash : null;
     imported.settings.recoveryHash = self.state ? self.state.settings.recoveryHash : null;
+    if (self.state && self.state.settings.cloud && self.state.settings.cloud.token) imported.settings.cloud = self.state.settings.cloud;
     return self.backupThenReplace(imported, now);
+  };
+
+  // --------------------------------------------------------------------
+  // Cloud — automatic backup to a private GitHub Gist (Marat, 2026-08-27).
+  // Pure over an injected fetch. The token is the parent's own (gist scope
+  // only), lives in settings.cloud on the device, never in export files.
+  // --------------------------------------------------------------------
+  var CLOUD_API = "https://api.github.com";
+  var CLOUD_FILE = "math-progress.json";
+
+  function cloudHeaders(token) {
+    return { Authorization: "Bearer " + token, Accept: "application/vnd.github+json", "Content-Type": "application/json" };
+  }
+
+  var Cloud = {
+    apiBase: CLOUD_API,
+    fileName: CLOUD_FILE,
+
+    // GET /gists?per_page=1 — 200 means the token works and has gist scope.
+    verifyToken: function (fetchFn, token) {
+      if (!token) return Promise.resolve({ ok: false, error: "no token" });
+      return fetchFn(CLOUD_API + "/gists?per_page=1", { headers: cloudHeaders(token) })
+        .then(function (res) { return res.ok ? { ok: true } : { ok: false, error: "HTTP " + res.status }; })
+        .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
+    },
+
+    // Creates the private gist on first use, then PATCHes the same one.
+    backup: function (fetchFn, cloud, json) {
+      if (!cloud || !cloud.token) return Promise.resolve({ ok: false, error: "no token" });
+      var body = { description: "לוח הכפל — backup", public: false, files: {} };
+      body.files[CLOUD_FILE] = { content: json };
+      var url = cloud.gistId ? CLOUD_API + "/gists/" + encodeURIComponent(cloud.gistId) : CLOUD_API + "/gists";
+      var method = cloud.gistId ? "PATCH" : "POST";
+      return fetchFn(url, { method: method, headers: cloudHeaders(cloud.token), body: JSON.stringify(body) })
+        .then(function (res) {
+          if (res.status === 404 && cloud.gistId) {
+            // the gist was deleted on GitHub: create a fresh one
+            return Cloud.backup(fetchFn, { token: cloud.token, gistId: null }, json);
+          }
+          if (!res.ok) return { ok: false, error: "HTTP " + res.status };
+          return res.json().then(function (data) { return { ok: true, gistId: data.id }; });
+        })
+        .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
+    },
+
+    // Latest backup content (follows raw_url when the API truncates >1 MB).
+    fetchLatest: function (fetchFn, cloud) {
+      if (!cloud || !cloud.token || !cloud.gistId) return Promise.resolve({ ok: false, error: "no gist" });
+      return fetchFn(CLOUD_API + "/gists/" + encodeURIComponent(cloud.gistId), { headers: cloudHeaders(cloud.token) })
+        .then(function (res) {
+          if (!res.ok) return { ok: false, error: "HTTP " + res.status };
+          return res.json().then(function (data) {
+            var f = data.files && data.files[CLOUD_FILE];
+            if (!f) return { ok: false, error: "no backup file in gist" };
+            if (f.truncated && f.raw_url) {
+              return fetchFn(f.raw_url, { headers: { Authorization: "Bearer " + cloud.token } }).then(function (r2) {
+                return r2.ok ? r2.text().then(function (t) { return { ok: true, json: t, updatedAt: data.updated_at }; }) : { ok: false, error: "HTTP " + r2.status };
+              });
+            }
+            return { ok: true, json: f.content, updatedAt: data.updated_at };
+          });
+        })
+        .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
+    },
+
+    // Finds this app's backup gist for a token that has no gistId yet (new device).
+    findGist: function (fetchFn, token) {
+      return fetchFn(CLOUD_API + "/gists?per_page=100", { headers: cloudHeaders(token) })
+        .then(function (res) {
+          if (!res.ok) return { ok: false, error: "HTTP " + res.status };
+          return res.json().then(function (list) {
+            var hit = (list || []).filter(function (g) { return g.files && g.files[CLOUD_FILE]; })
+              .sort(function (a, b) { return (a.updated_at < b.updated_at) ? 1 : -1; })[0];
+            return hit ? { ok: true, gistId: hit.id } : { ok: false, error: "no backup found" };
+          });
+        })
+        .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
+    },
   };
 
   var Storage = {
@@ -1567,6 +1654,7 @@
     Economy: Economy,
     Selector: Selector,
     Map: Map,
+    Cloud: Cloud,
     SessionCore: SessionCore,
     Storage: Storage,
     Pin: Pin,

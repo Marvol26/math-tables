@@ -253,6 +253,8 @@
       restoreFailed: function (err) { return "השחזור נכשל: " + err; },
       restoreBtn: "כן, לשחזר",
       restoreThenSetup: "ההתקדמות שוחזרה — עכשיו בחרו שם וקוד הורים חדש",
+      cloudRestoreTitle: "יש לכם גיבוי בענן? הדביקו את ה-Token ושחזרו",
+      cloudRestoreBtn: "שחזור מהענן",
     },
 
     question: {
@@ -392,6 +394,21 @@
       exportShareHint: "בחלון שנפתח בחרו \"שמירה בקבצים\" (Save to Files) ושמרו ב-iCloud Drive",
       exportDone: "הגיבוי נשמר ✓",
       exportCancelled: "הגיבוי בוטל",
+      cloudTitle: "גיבוי אוטומטי לענן ☁️",
+      cloudHint: "אחרי כל סבב הנתונים נשמרים ב-Gist פרטי בחשבון GitHub שלכם. צריך Token עם הרשאת gist בלבד (README מסביר).",
+      cloudTokenPlaceholder: "הדביקו כאן את ה-Token",
+      cloudSaveBtn: "שמירה ובדיקה",
+      cloudBackupNowBtn: "גיבוי עכשיו",
+      cloudRestoreBtn: "שחזור מהענן",
+      cloudDisconnectBtn: "ניתוק",
+      cloudConnected: "מחובר ✓",
+      cloudNotConnected: "לא מחובר",
+      cloudLastOk: function (d) { return "גיבוי אחרון לענן: " + bdi(d) + " ✓"; },
+      cloudLastError: function (e) { return "הגיבוי האחרון נכשל: " + e; },
+      cloudChecking: "בודקים…",
+      cloudTokenBad: function (e) { return "ה-Token לא עובד: " + e; },
+      cloudBackupDone: "נשמר בענן ✓",
+      cloudRestorePreview: function (d) { return "נמצא גיבוי בענן מ-" + bdi(d); },
       undoneMsg: "בוטל בהצלחה",
       resetBtn: "איפוס כל הנתונים",
       resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד",
@@ -466,6 +483,44 @@
     unlock: [[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.25]],
     perfect: [[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.1], [1319, 0.3]],
   };
+
+  // ------------------------------------------------------------------
+  // Cloud backup glue: debounced after every completed session / approval.
+  // Only api.github.com is ever contacted, only with the parent's own token.
+  // ------------------------------------------------------------------
+  var cloudTimer = null;
+  function cloudBackupSoon() {
+    var st = S();
+    if (!st || !st.settings.cloud || !st.settings.cloud.token) return;
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(cloudBackupNow, 4000);
+  }
+  function cloudBackupNow() {
+    var st = S();
+    if (!st || !st.settings.cloud || !st.settings.cloud.token) return Promise.resolve({ ok: false, error: "no token" });
+    var json = App.storage.serializeForExport();
+    var cloud = st.settings.cloud;
+    return MathCore.Cloud.backup(window.fetch.bind(window), cloud, json).then(function (result) {
+      return save(function (s) {
+        if (result.ok) { s.settings.cloud.gistId = result.gistId; s.settings.cloud.lastOkAt = Date.now(); s.settings.cloud.lastError = null; }
+        else { s.settings.cloud.lastError = result.error || "?"; }
+      }).then(function () { return result; });
+    });
+  }
+  function cloudRestore(token, gistId) {
+    var fetchFn = window.fetch.bind(window);
+    var found = gistId ? Promise.resolve({ ok: true, gistId: gistId }) : MathCore.Cloud.findGist(fetchFn, token);
+    return found.then(function (f) {
+      if (!f.ok) return f;
+      return MathCore.Cloud.fetchLatest(fetchFn, { token: token, gistId: f.gistId }).then(function (latest) {
+        if (!latest.ok) return latest;
+        return App.storage.importJson(latest.json, Date.now()).then(function (imp) {
+          if (!imp.ok) return { ok: false, error: (imp.problems || [imp.error || "?"]).join(", ") };
+          return save(function (s) { s.settings.cloud = { token: token, gistId: f.gistId, lastOkAt: Date.now(), lastError: null }; }).then(function () { return { ok: true, updatedAt: latest.updatedAt }; });
+        });
+      });
+    });
+  }
 
   // Confetti burst (P3): CSS-only pieces, removed after they fall.
   function confettiBurst(count) {
@@ -676,6 +731,11 @@
     var restoreHtml = snapSessions > currentSessions
       ? '<div class="restore-banner">' + T.parentSetup.restoreFound(snapSessions) + '<br><br><button data-action="restore-lastgood">' + T.parentSetup.restoreBtn + "</button></div>"
       : "";
+    var cloudHtml =
+      '<div class="muted" style="margin-top:1rem">' + T.parentSetup.cloudRestoreTitle + "</div>" +
+      '<input id="setup-cloud-token" type="password" autocomplete="off" placeholder="' + T.parent.cloudTokenPlaceholder + '" style="width:min(300px,80vw)" /> ' +
+      '<button class="secondary" data-action="setup-cloud-restore">' + T.parentSetup.cloudRestoreBtn + "</button>" +
+      '<div id="setup-cloud-msg" class="muted" style="min-height:1.2em"></div>';
     render(
       '<div class="screen" data-screen="parent-setup">' +
         '<div class="card" style="width:min(420px,92vw)">' +
@@ -689,8 +749,19 @@
         '<label>' + T.parentSetup.pinConfirmLabel + '<br>' +
         '<input id="setup-pin-confirm" type="password" inputmode="numeric" maxlength="4" /></label><br><br>' +
         '<button data-action="setup-continue">' + T.parentSetup.continueBtn + "</button>" +
+        cloudHtml +
         "</div></div>"
     );
+    bindAction("setup-cloud-restore", function () {
+      var token = (document.getElementById("setup-cloud-token").value || "").trim();
+      var m = document.getElementById("setup-cloud-msg");
+      if (!token) return;
+      m.textContent = T.parent.cloudChecking;
+      cloudRestore(token, null).then(function (r) {
+        if (r.ok) { route(); var e = document.getElementById("setup-error"); if (e) e.textContent = T.parentSetup.restoreThenSetup; }
+        else m.textContent = T.parent.restoreFailed(r.error || "?");
+      });
+    });
     document.querySelector('[data-action="setup-continue"]').addEventListener("click", onSetupContinue);
     bindAction("restore-lastgood", function () {
       App.storage.restoreLastGood(Date.now()).then(function (result) {
@@ -1143,6 +1214,7 @@
       // Summary is rendered only after finish()'s save resolved (DESIGN §6).
       if (result.ok && sessionResult) {
         App.lastSessionResult = sessionResult;
+        cloudBackupSoon();
         navigate("summary");
       }
     });
@@ -1494,9 +1566,11 @@
         renderRewardsSection(state) +
         renderStatsSection(state) +
         renderDataSection(state) +
+        renderCloudSection(state) +
         "</div></div>"
     );
     bindAction("back", function () { navigate("home"); });
+    wireCloudSection();
     wireSettingsSection();
     wireStorageStatusSection();
     wireRewardsSection();
@@ -1632,6 +1706,7 @@
         var approveResult = null;
         save(function (s) { approveResult = MathCore.Economy.approveRequest(s, id, ledgerId, Date.now()); }).then(function (result) {
           if (!result.ok) return; // stale/error already surfaced
+          cloudBackupSoon();
           if (approveResult && !approveResult.ok) {
             document.getElementById("pending-requests-msg").textContent = T.parent.insufficientBalanceMsg;
           } else {
@@ -1796,6 +1871,57 @@
       "<h3>" + T.parent.historyTitle + "</h3>" + historyHtml +
       "</div>"
     );
+  }
+
+  function renderCloudSection(state) {
+    var c = state.settings.cloud || {};
+    var status = c.token
+      ? (c.lastError ? T.parent.cloudLastError(escapeHtml(c.lastError)) : c.lastOkAt ? T.parent.cloudLastOk(new Date(c.lastOkAt).toLocaleString("he-IL")) : T.parent.cloudConnected)
+      : T.parent.cloudNotConnected;
+    return (
+      '<div class="card" style="margin-bottom:1rem">' +
+      "<h2>" + T.parent.cloudTitle + "</h2>" +
+      '<p class="muted">' + T.parent.cloudHint + "</p>" +
+      '<p id="cloud-status">' + status + "</p>" +
+      (c.token
+        ? '<button data-action="cloud-backup-now">' + T.parent.cloudBackupNowBtn + "</button> " +
+          '<button class="secondary" data-action="cloud-restore">' + T.parent.cloudRestoreBtn + "</button> " +
+          '<button class="ghost" data-action="cloud-disconnect">' + T.parent.cloudDisconnectBtn + "</button>"
+        : '<input id="cloud-token" type="password" autocomplete="off" placeholder="' + T.parent.cloudTokenPlaceholder + '" style="width:min(320px,80vw)" /> ' +
+          '<button data-action="cloud-save">' + T.parent.cloudSaveBtn + "</button>") +
+      '<div id="cloud-msg" class="muted" style="min-height:1.2em"></div>' +
+      "</div>"
+    );
+  }
+
+  function wireCloudSection() {
+    var msg = function (t) { var el = document.getElementById("cloud-msg"); if (el) el.textContent = t; };
+    bindAction("cloud-save", function () {
+      var token = (document.getElementById("cloud-token").value || "").trim();
+      if (!token) return;
+      msg(T.parent.cloudChecking);
+      MathCore.Cloud.verifyToken(window.fetch.bind(window), token).then(function (v) {
+        if (!v.ok) { msg(T.parent.cloudTokenBad(v.error)); return; }
+        return MathCore.Cloud.findGist(window.fetch.bind(window), token).then(function (f) {
+          return save(function (s) { s.settings.cloud = { token: token, gistId: f.ok ? f.gistId : null, lastOkAt: null, lastError: null }; });
+        }).then(function () { return cloudBackupNow(); }).then(function () { renderParentDashboard(); });
+      });
+    });
+    bindAction("cloud-backup-now", function () {
+      msg(T.parent.cloudChecking);
+      cloudBackupNow().then(function (r) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = r.ok ? T.parent.cloudBackupDone : T.parent.cloudLastError(r.error || "?"); });
+    });
+    bindAction("cloud-restore", function () {
+      var c = S().settings.cloud;
+      msg(T.parent.cloudChecking);
+      cloudRestore(c.token, c.gistId).then(function (r) {
+        if (r.ok) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.restoredMsg; }
+        else msg(T.parent.restoreFailed(r.error || "?"));
+      });
+    });
+    bindAction("cloud-disconnect", function () {
+      save(function (s) { s.settings.cloud = { token: null, gistId: null, lastOkAt: null, lastError: null }; }).then(renderParentDashboard);
+    });
   }
 
   function renderDataSection(state) {
