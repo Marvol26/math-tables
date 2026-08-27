@@ -215,6 +215,38 @@ test("[lastgood] the snapshot never shrinks: a fresh empty state cannot overwrit
   assert.equal(b.readLastGood().state.sessions.length, 5, "snapshot still holds the 5 sessions");
 });
 
+test("[lastgood] setup-path restore (no current PIN) clears the snapshot's PIN so setup continues", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d4" });
+  await a.load();
+  a.state = stateWithSessions(2);
+  a.state.settings.pinHash = "old:pin"; a.state.settings.recoveryHash = "old:rec";
+  await a.save((s) => {}, 100);
+  const b = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d4" });
+  localStorage.removeItem("mathtrainer.v1.mirror");
+  await b.load();
+  b.state = Migrate.emptyState(); // setup screen state: no PIN
+  const r = await b.restoreLastGood(300);
+  assert.equal(r.ok, true);
+  assert.equal(b.state.sessions.length, 2);
+  assert.equal(b.state.settings.pinHash, null);
+  assert.equal(b.state.settings.recoveryHash, null);
+});
+
+test("[lastgood] equal session count: the latest state wins; a deliberate reset clears the snapshot", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d5" });
+  await a.load();
+  a.state = stateWithSessions(2);
+  await a.save((s) => { s.settings.sound = false; }, 100);
+  await a.save((s) => { s.settings.sound = true; }, 200);
+  assert.equal(a.readLastGood().state.settings.sound, true);
+  a.clearLastGood();
+  assert.equal(a.readLastGood(), null);
+  await a.save((s) => {}, 300); // a later save re-seeds the snapshot from the current state
+  assert.equal(a.readLastGood().state.sessions.length, 2);
+});
+
 test("[lastgood] restoreLastGood brings the sessions back and keeps the PIN the parent just set", async () => {
   const localStorage = makeLocalStorage();
   const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d2" });

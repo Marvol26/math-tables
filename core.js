@@ -1263,10 +1263,36 @@
 
   StorageInstance.prototype._ratchet = function () {
     try {
-      var existing = this.readLastGood();
-      if (existing && sessionCount(existing.state) > sessionCount(this.state)) return; // never shrink
+      if (this._lastGoodCount === undefined) {
+        var existing = this.readLastGood(); // parsed once per window, then cached
+        this._lastGoodCount = existing ? sessionCount(existing.state) : -1;
+      }
+      var mine = sessionCount(this.state);
+      if (this._lastGoodCount > mine) return; // never shrink; at equal counts the latest wins
       this.localStorage.setItem(LASTGOOD_KEY, JSON.stringify({ rev: this.rev, savedAt: this.state && this.state.savedAt, state: this.state }));
+      this._lastGoodCount = mine;
     } catch (e) { /* best-effort */ }
+  };
+
+  // A deliberate, PIN-confirmed reset also forgets the snapshot (a fresh start
+  // for another child must not keep the previous child's data on the device);
+  // an accidental reset is still covered by undoLastReplace (IDB backup record).
+  StorageInstance.prototype.clearLastGood = function () {
+    try { this.localStorage.removeItem(LASTGOOD_KEY); } catch (e) { /* ignore */ }
+    this._lastGoodCount = -1;
+  };
+
+  // Pure serialization for export (no PIN material); marking lastExportAt is
+  // separate so a cancelled share sheet does not count as a backup.
+  StorageInstance.prototype.serializeForExport = function () {
+    return JSON.stringify(this.state, function (key, value) {
+      if (key === "pinHash" || key === "recoveryHash" || key === "cloud") return undefined;
+      return value;
+    });
+  };
+
+  StorageInstance.prototype.markExported = function (now) {
+    return this.save(function (s) { s.lastExportAt = now; }, now);
   };
 
   StorageInstance.prototype.readLastGood = function () {
@@ -1279,15 +1305,21 @@
   // Restores the ratchet snapshot over the current state (through the same
   // atomic backup-then-replace path as import), keeping the CURRENT device
   // PIN/recovery when the current state has them (the parent just typed them).
+  // If the current state has no PIN (setup screen), the restored state gets
+  // none either: the parent then completes setup normally — a new PIN and a
+  // fresh recovery code — on top of the restored progress (review 2026-08-27 #1).
   StorageInstance.prototype.restoreLastGood = function (now) {
-    var snapshot = this.readLastGood();
+    var self = this;
+    var snapshot = self.readLastGood();
     if (!snapshot || !snapshot.state) return Promise.resolve({ ok: false, error: "no snapshot" });
     var restored = Migrate.migrate(snapshot.state);
-    if (this.state && this.state.settings && this.state.settings.pinHash) {
-      restored.settings.pinHash = this.state.settings.pinHash;
-      restored.settings.recoveryHash = this.state.settings.recoveryHash;
-    }
-    return this.backupThenReplace(restored, now);
+    var hasPin = !!(self.state && self.state.settings && self.state.settings.pinHash);
+    restored.settings.pinHash = hasPin ? self.state.settings.pinHash : null;
+    restored.settings.recoveryHash = hasPin ? self.state.settings.recoveryHash : null;
+    var ready = self.db ? Promise.resolve() : idbOpen(self.idb, self.dbName).then(function (db) { self.db = db; }); // review #2: retry IDB
+    return ready
+      .then(function () { return self.backupThenReplace(restored, now); })
+      .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
   };
 
   StorageInstance.prototype._readMirror = function () {

@@ -250,7 +250,9 @@
       recoveryCheckbox: "כתבתי אותו",
       finishBtn: "סיימנו, בואי נשחק!",
       restoreFound: function (n) { return "נמצאו נתונים קודמים במכשיר הזה (" + bdi(n) + " סבבים) — לשחזר אותם?"; },
+      restoreFailed: function (err) { return "השחזור נכשל: " + err; },
       restoreBtn: "כן, לשחזר",
+      restoreThenSetup: "ההתקדמות שוחזרה — עכשיו בחרו שם וקוד הורים חדש",
     },
 
     question: {
@@ -386,6 +388,10 @@
       undoBtn: "ביטול הפעולה האחרונה",
       restoreLocalBtn: function (n) { return "שחזור מהעותק המקומי (" + bdi(n) + " סבבים)"; },
       restoredMsg: "שוחזר בהצלחה",
+      restoreFailed: function (err) { return "השחזור נכשל: " + err; },
+      exportShareHint: "בחלון שנפתח בחרו \"שמירה בקבצים\" (Save to Files) ושמרו ב-iCloud Drive",
+      exportDone: "הגיבוי נשמר ✓",
+      exportCancelled: "הגיבוי בוטל",
       undoneMsg: "בוטל בהצלחה",
       resetBtn: "איפוס כל הנתונים",
       resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד",
@@ -666,7 +672,8 @@
   Screens.parentSetup = function () {
     var snapshot = App.storage.readLastGood();
     var snapSessions = snapshot && snapshot.state && Array.isArray(snapshot.state.sessions) ? snapshot.state.sessions.length : 0;
-    var restoreHtml = snapSessions > 0
+    var currentSessions = App.storage.state && Array.isArray(App.storage.state.sessions) ? App.storage.state.sessions.length : 0;
+    var restoreHtml = snapSessions > currentSessions
       ? '<div class="restore-banner">' + T.parentSetup.restoreFound(snapSessions) + '<br><br><button data-action="restore-lastgood">' + T.parentSetup.restoreBtn + "</button></div>"
       : "";
     render(
@@ -686,7 +693,10 @@
     );
     document.querySelector('[data-action="setup-continue"]').addEventListener("click", onSetupContinue);
     bindAction("restore-lastgood", function () {
-      App.storage.restoreLastGood(Date.now()).then(function (result) { if (result.ok) route(); });
+      App.storage.restoreLastGood(Date.now()).then(function (result) {
+        if (result.ok) { route(); var e = document.getElementById("setup-error"); if (e) e.textContent = T.parentSetup.restoreThenSetup; }
+        else { document.getElementById("setup-error").textContent = T.parentSetup.restoreFailed(result.error || result.stale && T.staleCard || "?"); }
+      });
     });
   };
 
@@ -1813,20 +1823,34 @@
 
   function wireDataSection() {
     bindAction("export-data", function () {
-      App.storage.exportJson(Date.now()).then(function (result) {
-        if (!result.ok) return;
-        var dateStr = new Date().toISOString().slice(0, 10);
-        var blob = new Blob([result.json], { type: "application/json" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "math-progress-" + dateStr + ".json";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        renderParentDashboard(); // refresh lastExportAt display
-      });
+      var json = App.storage.serializeForExport();
+      var dateStr = new Date().toISOString().slice(0, 10);
+      var name = "math-progress-" + dateStr + ".json";
+      var msg = document.getElementById("data-section-msg");
+      // iOS (Home-Screen app or Safari) turns a download link into a preview
+      // page with no "save" — seen live 2026-08-27. The share sheet offers
+      // "Save to Files"; the download link stays as the desktop fallback.
+      var file = null;
+      try { file = new File([json], name, { type: "application/json" }); } catch (e) { file = null; }
+      if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        msg.textContent = T.parent.exportShareHint;
+        navigator.share({ files: [file], title: name }).then(function () {
+          return App.storage.markExported(Date.now()).then(function () { renderParentDashboard(); document.getElementById("data-section-msg").textContent = T.parent.exportDone; });
+        }).catch(function (err) {
+          msg.textContent = err && err.name === "AbortError" ? T.parent.exportCancelled : T.parent.restoreFailed(String(err && err.message || err));
+        });
+        return;
+      }
+      var blob = new Blob([json], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      App.storage.markExported(Date.now()).then(function () { renderParentDashboard(); });
     });
 
     bindAction("trigger-import", function () {
@@ -1858,6 +1882,7 @@
     bindAction("restore-lastgood", function () {
       App.storage.restoreLastGood(Date.now()).then(function (result) {
         if (result.ok) { document.getElementById("data-section-msg").textContent = T.parent.restoredMsg; renderParentDashboard(); }
+        else { document.getElementById("data-section-msg").textContent = T.parent.restoreFailed(result.error || "stale"); }
       });
     });
     bindAction("undo-last", function () {
@@ -1934,7 +1959,7 @@
         fresh.settings.recoveryHash = current.settings.recoveryHash;
         fresh.settings.childName = current.settings.childName;
         App.storage.backupThenReplace(fresh, Date.now()).then(function (result) {
-          if (result.ok) renderParentDashboard();
+          if (result.ok) { App.storage.clearLastGood(); renderParentDashboard(); }
         });
       });
     });
