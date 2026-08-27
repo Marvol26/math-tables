@@ -139,9 +139,9 @@ day's perfect bonus before a harder typed perfect that same day, which would
 then earn 0; and a day where the child only played falling still counts
 toward `dailyStreak`. Both are consistent with the letter of F4 ("coins/
 stickers apply" to falling) but the interaction was never explicitly decided.
-Not fixed — needs Marat's call: (a) leave as-is (simplest, and arguably fine —
-a bonus is a bonus), (b) give falling its own separate daily-perfect slot, or
-(c) exclude falling-only days from the streak. Left for a future session.
+**Decided by Marat (2026-08-27, at push time): leave as-is.** No code
+change — the shared once-per-day perfect bonus and shared daily streak
+apply to both modes, unchanged.
 
 ## Falling numbers — residual verification (WP-F3, 2026-08-27)
 The `resize_window` browser automation tool did not reliably shrink the
