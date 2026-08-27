@@ -338,3 +338,12 @@ assumptions discovered: none
 
 ## Batch status: build complete pending Marat's push decision (WP-F7)
 Per falling-build-plan.md, WP-F1 through WP-F8 are done: HG-1..HG-3 and the preflight passed; the plan's work packages executed in order with a status-log entry after every step; the closing adversarial review (WP-F8) ran on the full diff, found 2 MEDIUM issues, both fixed with regression tests proven to fail on pre-fix code (one via `git stash`, one via a `core.js` mutation test), and the fix-verification pass by the same reviewer returned SHIP. `npm test` → 133/133. Version bumped to 0.8.0 / sw v9 in all three required places. The only remaining item is WP-F7 (push), which requires Marat's explicit yes and is not yet given — the entire batch (commits 6d77f6b..4fe84eb) sits on `main`, unpushed, 9 commits ahead of `origin/main`. One open design question for Marat, not a defect (recorded in NEXT-ACTIONS.md): whether the once-per-day perfect bonus and daily streak counter should distinguish typed vs falling sessions.
+
+## 2026-08-27T16:20:00Z · falling-numbers WP-F7 · push · DONE
+commit: 3e2dd0a (pushed)
+evidence: Marat's explicit yes given for both open items — "Push 0.8.0? Yes, push now" and the perfect-bonus/streak-sharing design question — "leave as-is (recommended)", recorded in NEXT-ACTIONS.md. `git push origin main` → `067aed3..3e2dd0a main -> main` (10 commits: the design/plan doc commit already present on origin plus WP-F1 through WP-F8 and this decision). Polled `https://marvol26.github.io/math-tables/sw.js` every 15s: attempt 1-2 still `v8` (GitHub Pages propagation lag), attempt 3 → `VERSION = "v9"` — live.
+deviations: none
+assumptions discovered: none
+
+## Batch status: DONE — falling numbers mode is live at v0.8.0 / sw v9
+Per falling-build-plan.md's executor contract: WP-F1 through WP-F8 all complete, the closing adversarial review found and fixed 2 MEDIUM issues with proven regression tests, the fix-verification pass returned SHIP, Marat gave explicit yes for the push, and GitHub Pages confirms sw v9 live. `npm test` → 133/133. One design decision recorded (perfect-bonus/streak sharing across modes: left as-is, Marat's call). Residuals for a future session, both LOW/cosmetic and non-blocking (recorded in NEXT-ACTIONS.md): precise small-viewport (320px/6-option) pixel verification, bubble wobble/64px spec-literalness gap, "עוד סבב!" always starting a typed session after a falling summary, no visual cue on backgrounding mid-fall.
