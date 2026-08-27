@@ -68,7 +68,7 @@ test("fetchLatest: returns content, follows raw_url when truncated; findGist pic
 
 test("settings.cloud: defaulted by migrate, stripped from export, kept on import", () => {
   const s = Migrate.emptyState();
-  assert.deepEqual(s.settings.cloud, { token: null, gistId: null, lastOkAt: null, lastError: null });
+  assert.deepEqual(s.settings.cloud, { token: null, gistId: null, lastOkAt: null, lastError: null, restoreFromGistId: null });
   const raw = Migrate.emptyState(); raw.settings.cloud = { token: "t", gistId: "g", lastOkAt: 5, lastError: null };
   assert.equal(Migrate.migrate(raw).settings.cloud.token, "t");
   assert.equal(Migrate.validateImport(raw).ok, true);

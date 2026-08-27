@@ -954,7 +954,7 @@
           recoveryHash: null,
           forceNumpad: null,
           // Cloud backup (private GitHub Gist). Device-local: stripped from export, kept on import.
-          cloud: { token: null, gistId: null, lastOkAt: null, lastError: null },
+          cloud: { token: null, gistId: null, lastOkAt: null, lastError: null, restoreFromGistId: null },
         },
         economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
         facts: {},
@@ -997,6 +997,8 @@
             gistId: rs.cloud && typeof rs.cloud.gistId === "string" ? rs.cloud.gistId : null,
             lastOkAt: rs.cloud && typeof rs.cloud.lastOkAt === "number" ? rs.cloud.lastOkAt : null,
             lastError: rs.cloud && typeof rs.cloud.lastError === "string" ? rs.cloud.lastError : null,
+            // a bigger backup found at connect time that was NOT adopted; restore prefers it
+            restoreFromGistId: rs.cloud && typeof rs.cloud.restoreFromGistId === "string" ? rs.cloud.restoreFromGistId : null,
           },
         },
         economy: {
