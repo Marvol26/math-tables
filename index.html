@@ -411,10 +411,15 @@
       cloudChecking: "בודקים…",
       cloudTokenBad: function (e) { return "ה-Token לא עובד: " + e; },
       cloudBackupDone: "נשמר בענן ✓",
-      cloudRestorePreview: function (d) { return "נמצא גיבוי בענן מ-" + bdi(d); },
+      cloudRestorePreview: function (d, n) { return "נמצא גיבוי בענן מ-" + bdi(d) + " (" + bdi(n) + " סבבים)"; },
+      cloudFoundExisting: "נמצא גיבוי קיים בחשבון — הוא לא נדרס. כדי להשתמש בו לחצו \"שחזור מהענן\"; הגיבוי האוטומטי ימשיך אחרי הסבב הבא.",
+      cloudRestoreConfirmBtn: "אישור שחזור",
+      cloudRestoreWarnSmaller: "שימו לב: בענן פחות סבבים מאשר במכשיר",
+      cloudEmptySkipped: "אין עדיין סבבים — הגיבוי יתחיל אחרי הסבב הראשון",
+      cloudSecretNote: "ה-Gist \"סודי\": מי שמחזיק בקישור יכול לקרוא אותו; אין בו קוד הורים.",
       undoneMsg: "בוטל בהצלחה",
       resetBtn: "איפוס כל הנתונים",
-      resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד",
+      resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד (הקוד וה-Token לענן נשמרים; הגיבוי בענן יתחיל מחדש)",
       resetTypeConfirm: "מחק",
       resetTypeLabel: "הקלידו \"מחק\"",
       resetTypeMismatch: "צריך להקליד בדיוק \"מחק\"",
@@ -501,6 +506,8 @@
   function cloudBackupNow() {
     var st = S();
     if (!st || !st.settings.cloud || !st.settings.cloud.token) return Promise.resolve({ ok: false, error: "no token" });
+    // Never upload an empty state over a real backup (the data-loss incident, review #1).
+    if (!st.sessions || st.sessions.length === 0) return Promise.resolve({ ok: false, error: T.parent.cloudEmptySkipped, skipped: true });
     var json = App.storage.serializeForExport();
     var cloud = st.settings.cloud;
     return MathCore.Cloud.backup(window.fetch.bind(window), cloud, json).then(function (result) {
@@ -510,6 +517,33 @@
       }).then(function () { return result; });
     });
   }
+  // iOS may kill the app before the 4 s debounce fires — flush on hide.
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && cloudTimer) { clearTimeout(cloudTimer); cloudTimer = null; cloudBackupNow(); }
+  });
+
+  // Fetches the latest cloud backup without applying it (preview step).
+  function cloudPeek(token, gistId) {
+    var fetchFn = window.fetch.bind(window);
+    var found = gistId ? Promise.resolve({ ok: true, gistId: gistId }) : MathCore.Cloud.findGist(fetchFn, token);
+    return found.then(function (f) {
+      if (!f.ok) return f;
+      return MathCore.Cloud.fetchLatest(fetchFn, { token: token, gistId: f.gistId }).then(function (latest) {
+        if (!latest.ok) return latest;
+        var count = 0;
+        try { var parsed = JSON.parse(latest.json); count = Array.isArray(parsed.sessions) ? parsed.sessions.length : 0; } catch (e) { return { ok: false, error: "invalid JSON" }; }
+        return { ok: true, gistId: f.gistId, json: latest.json, updatedAt: latest.updatedAt, sessions: count };
+      });
+    });
+  }
+
+  function cloudApply(token, gistId, json) {
+    return App.storage.importJson(json, Date.now()).then(function (imp) {
+      if (!imp.ok) return { ok: false, error: (imp.problems || [imp.error || "?"]).join(", ") };
+      return save(function (s) { s.settings.cloud = { token: token, gistId: gistId, lastOkAt: Date.now(), lastError: null }; }).then(function () { return { ok: true }; });
+    });
+  }
+
   function cloudRestore(token, gistId) {
     var fetchFn = window.fetch.bind(window);
     var found = gistId ? Promise.resolve({ ok: true, gistId: gistId }) : MathCore.Cloud.findGist(fetchFn, token);
@@ -1118,10 +1152,10 @@
     switch (n) {
       case 10: return eq(m + " × 10 = " + m + "0") + " — מוסיפים 0";
       case 9: return eq("10 × " + m + " − " + m + " = " + (10 * m) + " − " + m + " = " + p);
-      case 5: return eq("10 × " + m + " = " + (10 * m) + ", חצי = " + p);
+      case 5: return eq("10 × " + m + " = " + (10 * m)) + ", חצי מזה: " + eq(String(p));
       case 2: return eq(m + " + " + m + " = " + p);
-      case 4: return eq("2 × " + m + " = " + (2 * m) + ", כפול 2 = " + p);
-      case 8: return eq("4 × " + m + " = " + (4 * m) + ", כפול 2 = " + p);
+      case 4: return eq("2 × " + m + " = " + (2 * m)) + ", כפול 2: " + eq(String(p));
+      case 8: return eq("4 × " + m + " = " + (4 * m)) + ", כפול 2: " + eq(String(p));
       case 3: return eq("2 × " + m + " + " + m + " = " + (2 * m) + " + " + m + " = " + p);
       case 6: return eq("5 × " + m + " + " + m + " = " + (5 * m) + " + " + m + " = " + p);
       case 7: return eq("5 × " + m + " + 2 × " + m + " = " + (5 * m) + " + " + (2 * m) + " = " + p);
@@ -1913,7 +1947,7 @@
     return (
       '<div class="card" style="margin-bottom:1rem">' +
       "<h2>" + T.parent.cloudTitle + "</h2>" +
-      '<p class="muted">' + T.parent.cloudHint + "</p>" +
+      '<p class="muted">' + T.parent.cloudHint + " " + T.parent.cloudSecretNote + "</p>" +
       '<p id="cloud-status">' + status + "</p>" +
       (c.token
         ? '<button data-action="cloud-backup-now">' + T.parent.cloudBackupNowBtn + "</button> " +
@@ -1935,8 +1969,11 @@
       MathCore.Cloud.verifyToken(window.fetch.bind(window), token).then(function (v) {
         if (!v.ok) { msg(T.parent.cloudTokenBad(v.error)); return; }
         return MathCore.Cloud.findGist(window.fetch.bind(window), token).then(function (f) {
-          return save(function (s) { s.settings.cloud = { token: token, gistId: f.ok ? f.gistId : null, lastOkAt: null, lastError: null }; });
-        }).then(function () { return cloudBackupNow(); }).then(function () { renderParentDashboard(); });
+          return save(function (s) { s.settings.cloud = { token: token, gistId: f.ok ? f.gistId : null, lastOkAt: null, lastError: null }; }).then(function () {
+            if (f.ok) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.cloudFoundExisting; return; } // existing backup is never overwritten on connect
+            return cloudBackupNow().then(function (r) { renderParentDashboard(); var el2 = document.getElementById("cloud-msg"); if (el2 && r.skipped) el2.textContent = r.error; });
+          });
+        });
       });
     });
     bindAction("cloud-backup-now", function () {
@@ -1946,9 +1983,20 @@
     bindAction("cloud-restore", function () {
       var c = S().settings.cloud;
       msg(T.parent.cloudChecking);
-      cloudRestore(c.token, c.gistId).then(function (r) {
-        if (r.ok) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.restoredMsg; }
-        else msg(T.parent.restoreFailed(r.error || "?"));
+      cloudPeek(c.token, c.gistId).then(function (p) {
+        if (!p.ok) { msg(T.parent.restoreFailed(p.error || "?")); return; }
+        var local = (S().sessions || []).length;
+        var area = document.getElementById("cloud-msg");
+        area.innerHTML =
+          "<div>" + T.parent.cloudRestorePreview(new Date(p.updatedAt).toLocaleString("he-IL"), p.sessions) + "</div>" +
+          (p.sessions < local ? '<div style="color:var(--wrong)">' + T.parent.cloudRestoreWarnSmaller + "</div>" : "") +
+          '<button data-action="cloud-restore-confirm" style="margin-top:0.4rem">' + T.parent.cloudRestoreConfirmBtn + "</button>";
+        bindAction("cloud-restore-confirm", function () {
+          cloudApply(c.token, p.gistId, p.json).then(function (r) {
+            if (r.ok) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.restoredMsg; }
+            else msg(T.parent.restoreFailed(r.error || "?"));
+          });
+        });
       });
     });
     bindAction("cloud-disconnect", function () {
@@ -2116,6 +2164,7 @@
         fresh.settings.pinHash = current.settings.pinHash;
         fresh.settings.recoveryHash = current.settings.recoveryHash;
         fresh.settings.childName = current.settings.childName;
+        fresh.settings.cloud = { token: current.settings.cloud ? current.settings.cloud.token : null, gistId: null, lastOkAt: null, lastError: null }; // new gist for the fresh start; the old backup is kept
         App.storage.backupThenReplace(fresh, Date.now()).then(function (result) {
           if (result.ok) { App.storage.clearLastGood(); renderParentDashboard(); }
         });

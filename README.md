@@ -26,7 +26,7 @@
 1. ב-GitHub: Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token. סמנו **רק** את ההרשאה `gist`. בחרו תפוגה ארוכה (או No expiration).
 2. באפליקציה: הורים → קוד → **גיבוי אוטומטי לענן** → הדביקו את ה-Token → **שמירה ובדיקה**. מעכשיו כל סבב שמסתיים מגובה אוטומטית.
 3. במכשיר חדש: במסך ההגדרה הראשון הדביקו את אותו Token → **שחזור מהענן**, ואז בחרו שם וקוד.
-ה-Token נשמר רק על המכשיר (לא בקובץ הייצוא ולא בקוד). אם ה-Token דלף — מחקו אותו ב-GitHub וצרו חדש.
+ה-Token נשמר רק על המכשיר (לא בקובץ הייצוא ולא בקוד). אם ה-Token דלף — מחקו אותו ב-GitHub וצרו חדש. ה-Gist הוא "סודי" (secret): לא מופיע בפרופיל, אבל מי שמחזיק בקישור יכול לקרוא אותו — אין בו קוד הורים. חשבון אחד = ילדה אחת (הגיבוי האוטומטי משתמש ב-Gist האחרון שנמצא בחשבון).
 
 ## ייצוא ידני ב-iPad
 לחיצה על **ייצוא גיבוי** פותחת את חלון השיתוף של iOS — בחרו **Save to Files / שמירה בקבצים** ושמרו ב-iCloud Drive. (פתיחה רגילה של הקובץ בדפדפן מציגה אותו בלבד ואינה שומרת.)
@@ -78,7 +78,7 @@ After every session the app can save a copy to a **private Gist** in your GitHub
 1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token with **only** the `gist` scope (long or no expiration).
 2. In the app: parents → PIN → **גיבוי אוטומטי לענן** → paste the token → **שמירה ובדיקה**. Every completed session is then backed up automatically.
 3. On a new device: on the first setup screen paste the same token → **שחזור מהענן**, then choose a name and PIN.
-The token lives only on the device (never in export files or the code). If it leaks, revoke it on GitHub and create a new one.
+The token lives only on the device (never in export files or the code). If it leaks, revoke it on GitHub and create a new one. The gist is *secret* (unlisted, readable by anyone with the link; it contains no PIN). One GitHub account = one child (auto-backup uses the newest backup gist in the account).
 
 ## Manual export on iPad
 **ייצוא גיבוי** opens the iOS share sheet — choose **Save to Files** (iCloud Drive). Opening the file in the browser only previews it and does not save.

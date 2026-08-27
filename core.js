@@ -1318,15 +1318,24 @@
   // fresh recovery code — on top of the restored progress (review 2026-08-27 #1).
   StorageInstance.prototype.restoreLastGood = function (now) {
     var self = this;
-    var snapshot = self.readLastGood();
-    if (!snapshot || !snapshot.state) return Promise.resolve({ ok: false, error: "no snapshot" });
-    var restored = Migrate.migrate(snapshot.state);
-    var hasPin = !!(self.state && self.state.settings && self.state.settings.pinHash);
-    restored.settings.pinHash = hasPin ? self.state.settings.pinHash : null;
-    restored.settings.recoveryHash = hasPin ? self.state.settings.recoveryHash : null;
-    var ready = self.db ? Promise.resolve() : idbOpen(self.idb, self.dbName).then(function (db) { self.db = db; }); // review #2: retry IDB
-    return ready
-      .then(function () { return self.backupThenReplace(restored, now); })
+    return Promise.resolve()
+      .then(function () {
+        var snapshot = self.readLastGood();
+        if (!snapshot || !snapshot.state) return { ok: false, error: "no snapshot" };
+        var restored = Migrate.migrate(snapshot.state); // may throw SCHEMA_TOO_NEW → caught below
+        var cur = self.state && self.state.settings;
+        var hasPin = !!(cur && cur.pinHash);
+        restored.settings.pinHash = hasPin ? cur.pinHash : null;
+        restored.settings.recoveryHash = hasPin ? cur.recoveryHash : null;
+        if (cur && cur.cloud && cur.cloud.token) restored.settings.cloud = cur.cloud; // keep the token the parent set now
+        // Retry IDB if the boot never opened it; adopt the stored rev so the CAS
+        // write below compares against what is really on disk.
+        var ready = self.db ? Promise.resolve() : idbOpen(self.idb, self.dbName).then(function (db) {
+          self.db = db;
+          return idbGet(db, RECORD_ID).then(function (rec) { if (rec && typeof rec.rev === "number") self.rev = rec.rev; });
+        });
+        return ready.then(function () { return self.backupThenReplace(restored, now); });
+      })
       .catch(function (err) { return { ok: false, error: String((err && err.message) || err) }; });
   };
 
@@ -1507,7 +1516,9 @@
     var imported = Migrate.forImport(raw);
     imported.settings.pinHash = self.state ? self.state.settings.pinHash : null;
     imported.settings.recoveryHash = self.state ? self.state.settings.recoveryHash : null;
-    if (self.state && self.state.settings.cloud && self.state.settings.cloud.token) imported.settings.cloud = self.state.settings.cloud;
+    // Cloud settings are device configuration, never adopted from a file (a
+    // crafted backup could otherwise install a foreign token — review 2026-08-27 #2).
+    imported.settings.cloud = self.state && self.state.settings.cloud ? self.state.settings.cloud : { token: null, gistId: null, lastOkAt: null, lastError: null };
     return self.backupThenReplace(imported, now);
   };
 
@@ -1564,7 +1575,7 @@
             var f = data.files && data.files[CLOUD_FILE];
             if (!f) return { ok: false, error: "no backup file in gist" };
             if (f.truncated && f.raw_url) {
-              return fetchFn(f.raw_url, { headers: { Authorization: "Bearer " + cloud.token } }).then(function (r2) {
+              return fetchFn(f.raw_url).then(function (r2) { // secret-gist raw URLs need no token
                 return r2.ok ? r2.text().then(function (t) { return { ok: true, json: t, updatedAt: data.updated_at }; }) : { ok: false, error: "HTTP " + r2.status };
               });
             }

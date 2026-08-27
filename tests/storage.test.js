@@ -291,3 +291,37 @@ test("[cloud] serializeForExport strips token material; importJson keeps the dev
   assert.equal(r.ok, true);
   assert.equal(a.state.settings.cloud.token, "secret");
 });
+
+test("[cloud] importJson never adopts a token from the file (foreign token attack)", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d7" });
+  await a.load();
+  a.state = stateWithSessions(1); // no token on this device
+  await a.save((s) => {}, 100);
+  const foreign = Migrate.emptyState(); foreign.settings.cloud = { token: "ATTACKER", gistId: "evil", lastOkAt: 2, lastError: null };
+  const r = await a.importJson(JSON.stringify(foreign), 200);
+  assert.equal(r.ok, true);
+  assert.equal(a.state.settings.cloud.token, null);
+  assert.equal(a.state.settings.cloud.gistId, null);
+});
+
+test("[lastgood] restoreLastGood opens IDB itself when the window has no db yet, and reports a too-new snapshot as an error", async () => {
+  const localStorage = makeLocalStorage();
+  const idb = new IDBFactory();
+  const a = Storage.create({ indexedDB: idb, localStorage, dbName: "d8" });
+  await a.load();
+  a.state = stateWithSessions(2);
+  await a.save((s) => {}, 100);
+  const b = Storage.create({ indexedDB: idb, localStorage, dbName: "d8" }); // no load(): db === null
+  b.state = Migrate.emptyState();
+  const r = await b.restoreLastGood(200);
+  assert.equal(r.ok, true);
+  assert.equal(b.state.sessions.length, 2);
+  const snap = JSON.parse(localStorage.getItem("mathtrainer.v1.lastgood"));
+  snap.state.schemaVersion = 99; localStorage.setItem("mathtrainer.v1.lastgood", JSON.stringify(snap));
+  const c = Storage.create({ indexedDB: idb, localStorage, dbName: "d8" });
+  c.state = Migrate.emptyState();
+  const bad = await c.restoreLastGood(300);
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /newer/);
+});
