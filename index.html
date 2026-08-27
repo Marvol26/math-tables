@@ -224,6 +224,8 @@
     home: {
       startCta: "בואי נתחיל!",
       resumeCta: "ממשיכות!",
+      resumeFallingCta: "ממשיכות! 🎈",
+      fallingBtn: "מספרים נופלים 🎈",
       greeting: function (name) { return "היי, " + name + "!"; },
       mapBtn: "המפה שלי 🗺️",
       mapStatus: function (table, progress, required) { return "🐢 את בתחנה " + tableTag(table) + " · " + bdi(progress + "/" + required); },
@@ -344,6 +346,9 @@
       challengeLabel: "מצב אתגר",
       timeLimitLabel: "זמן לשאלה (שניות)",
       soundLabel: "צלילים",
+      fallingEnableLabel: "מספרים נופלים 🎈 — מצב נוסף",
+      fallingDurationLabel: "זמן נפילה (שניות)",
+      fallingOptionsLabel: "מספר בועות לבחירה",
       changePinBtn: "שינוי קוד",
       saveSettingsBtn: "שמירה",
       settingsSaved: "נשמר ✓",
@@ -864,6 +869,8 @@
     var childName = (state.settings.childName || "").trim();
     var station = MathCore.Map.currentStation(state);
     var mapLine = station === null ? T.home.mapDone : T.home.mapStatus(station, MathCore.Map.progress(state, station), CONFIG.STATION_REQUIRED);
+    var isFallingActive = hasActive && state.active.mode === "falling";
+    var showFallingBtn = !hasActive && !!(state.settings.falling && state.settings.falling.enabled);
 
     render(
       '<div class="screen" data-screen="home">' +
@@ -872,7 +879,8 @@
         '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<div class="map-status">' + mapLine + "</div>" +
-        '<button data-action="play">' + (hasActive ? T.home.resumeCta : T.home.startCta) + "</button>" +
+        '<button data-action="play">' + (hasActive ? (isFallingActive ? T.home.resumeFallingCta : T.home.resumeCta) : T.home.startCta) + "</button>" +
+        (showFallingBtn ? ' <button data-action="play-falling">' + T.home.fallingBtn + "</button>" : "") +
         '<div><button class="secondary" data-action="nav-map">' + T.home.mapBtn + "</button> " +
         '<button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
         '<button class="secondary" data-action="nav-rewards">' + T.home.rewardsBtn + "</button></div>" +
@@ -883,6 +891,7 @@
     );
 
     bindAction("play", startOrResumeSession);
+    bindAction("play-falling", startFallingSession);
     bindAction("nav-collection", function () { navigate("collection"); });
     bindAction("nav-rewards", function () { navigate("rewards"); });
     bindAction("nav-map", function () { navigate("map"); });
@@ -908,6 +917,17 @@
     } else {
       navigate("question");
     }
+  }
+
+  // Falling mode entry (docs/FALLING-DESIGN.md F1) — only reachable when no
+  // session is already active; Home hides this button otherwise (one session
+  // at a time).
+  function startFallingSession() {
+    var state = S();
+    if (state.active) { navigate("question"); return; }
+    save(function (s) { MathCore.SessionCore.start(s, Math.random, Date.now(), { mode: "falling" }); }).then(function (result) {
+      if (result.ok) { navigate("question"); }
+    });
   }
 
   function bindAction(action, handler) {
@@ -1644,6 +1664,7 @@
   }
 
   function renderSettingsSection(state) {
+    var falling = state.settings.falling || { enabled: false, durationSec: CONFIG.FALLING.DEFAULT_DURATION_SEC, options: CONFIG.FALLING.DEFAULT_OPTIONS };
     return (
       '<div class="card" style="margin-bottom:1rem">' +
       "<h2>" + T.parent.settingsTitle + "</h2>" +
@@ -1652,6 +1673,12 @@
       "<label>" + T.parent.timeLimitLabel + ': <span id="set-time-limit-value">' + state.settings.timeLimitSec + "</span><br>" +
       '<input id="set-time-limit" type="range" min="' + CONFIG.MIN_TIME_LIMIT_SEC + '" max="' + CONFIG.MAX_TIME_LIMIT_SEC + '" value="' + state.settings.timeLimitSec + '" /></label><br><br>' +
       '<label><input id="set-sound" type="checkbox" ' + (state.settings.sound ? "checked" : "") + " /> " + T.parent.soundLabel + "</label><br><br>" +
+      '<label><input id="set-falling-enable" type="checkbox" ' + (falling.enabled ? "checked" : "") + " /> " + T.parent.fallingEnableLabel + "</label><br><br>" +
+      "<label>" + T.parent.fallingDurationLabel + ': <span id="set-falling-duration-value">' + falling.durationSec + "</span><br>" +
+      '<input id="set-falling-duration" type="range" min="' + CONFIG.FALLING.MIN_DURATION_SEC + '" max="' + CONFIG.FALLING.MAX_DURATION_SEC + '" value="' + falling.durationSec + '" /></label><br><br>' +
+      "<label>" + T.parent.fallingOptionsLabel + '<br><select id="set-falling-options">' +
+      [4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (falling.options === n ? " selected" : "") + ">" + n + "</option>"; }).join("") +
+      "</select></label><br><br>" +
       '<button data-action="save-settings">' + T.parent.saveSettingsBtn + "</button> " +
       '<button class="secondary" data-action="change-pin">' + T.parent.changePinBtn + "</button>" +
       '<div class="muted" id="settings-saved-msg" style="min-height:1.2em"></div>' +
@@ -1664,16 +1691,24 @@
     rangeInput.addEventListener("input", function () {
       document.getElementById("set-time-limit-value").textContent = rangeInput.value;
     });
+    var fallingRangeInput = document.getElementById("set-falling-duration");
+    fallingRangeInput.addEventListener("input", function () {
+      document.getElementById("set-falling-duration-value").textContent = fallingRangeInput.value;
+    });
     bindAction("save-settings", function () {
       var name = document.getElementById("set-name").value.trim();
       var challengeOn = document.getElementById("set-challenge").checked;
       var timeLimitSec = Number(document.getElementById("set-time-limit").value);
       var sound = document.getElementById("set-sound").checked;
+      var fallingEnabled = document.getElementById("set-falling-enable").checked;
+      var fallingDurationSec = Number(document.getElementById("set-falling-duration").value);
+      var fallingOptions = Number(document.getElementById("set-falling-options").value);
       save(function (s) {
         s.settings.childName = name;
         s.settings.challengeOn = challengeOn;
         s.settings.timeLimitSec = timeLimitSec;
         s.settings.sound = sound;
+        s.settings.falling = { enabled: fallingEnabled, durationSec: fallingDurationSec, options: fallingOptions };
       }).then(function (result) {
         if (result.ok) document.getElementById("settings-saved-msg").textContent = T.parent.settingsSaved;
       });
