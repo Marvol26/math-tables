@@ -245,3 +245,9 @@ commit: 21cac6f + follow-up (restoreFromGistId)
 evidence: fix-verification: all items FIXED; item 1 residual closed (connect adopts an existing gist only when local ≥ cloud; otherwise a new gist + restore offer; empty state never uploads). Reviewer's final LOW (a later small gist becoming "newest" hides the big one from in-app restore) fixed by remembering `settings.cloud.restoreFromGistId` at connect and preferring it in restore. Verdict SHIP. Tests 110/110. Push pending Marat.
 deviations: none
 assumptions discovered: none
+
+## 2026-08-27T11:20:00Z · falling-numbers mode · design + executor brief written (designer), execution handed to a Sonnet session
+commit: see git log (docs only)
+evidence: Marat requested a second game mode (expression + ≥4 falling candidate answers, parent-set fall time, hard distractors, tap to answer) and asked for a plan to execute with Sonnet. Written: docs/FALLING-DESIGN.md (F1–F10) and falling-build-plan.md (WP-F1..WP-F8 with kickoff prompt). Designer decisions to note: falling mode earns coins/stickers but never touches mastery/map/carryover (recognition ≠ recall); landing is never a miss; ×2 comes from SessionCore via the Challenge snapshot.
+deviations: none
+assumptions discovered: none
