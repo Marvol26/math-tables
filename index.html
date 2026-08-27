@@ -68,7 +68,9 @@
     gap: 0.4em;
   }
   .equation input {
-    width: 2.2em;
+    width: 2.9em; /* three digits (100) with the bold font; was 2.2em and clipped two-digit answers on iPad */
+    padding: 0 0.1em;
+    box-sizing: content-box;
     text-align: center;
     border: 3px solid var(--primary);
     border-radius: 16px;
@@ -76,7 +78,7 @@
     color: inherit;
     background: #fff;
   }
-  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; width: min(320px, 90vw); }
+  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; width: min(320px, 90vw); direction: ltr; } /* phone layout: 1 2 3 left→right even on the RTL page */
   .numpad button { min-height: 56px; min-width: 56px; font-size: 1.4rem; background: var(--card-bg); color: var(--text); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
   .numpad button.check { background: var(--correct); color: #fff; }
   /* Challenge Mode "turtle walk" (2026-08-27): time passing as a small story, not a countdown */
@@ -95,6 +97,8 @@
   .dot-array span { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--primary); opacity: 0; animation: dot-in 0.25s ease forwards; }
   @keyframes dot-in { to { opacity: 1; transform: scale(1); } }
   .dot-array-caption { font-weight: bold; color: var(--text); }
+  .continue-btn { margin-top: 0.6rem; }
+  .restore-banner { background: var(--gold); border-radius: 16px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
   .chart-value { font: 10px sans-serif; fill: #2B2D42; }
   /* Journey map (docs/MAP-DESIGN.md) */
   .map-wrap { width: min(420px, 94vw); direction: ltr; unicode-bidi: isolate; }
@@ -200,7 +204,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.6.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.7.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -245,6 +249,8 @@
       recoveryHint: "כתבו את זה במקום בטוח — בלעדיו אי אפשר לשחזר קוד שכוח",
       recoveryCheckbox: "כתבתי אותו",
       finishBtn: "סיימנו, בואי נשחק!",
+      restoreFound: function (n) { return "נמצאו נתונים קודמים במכשיר הזה (" + bdi(n) + " סבבים) — לשחזר אותם?"; },
+      restoreBtn: "כן, לשחזר",
     },
 
     question: {
@@ -264,6 +270,8 @@
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
       exitButton: "✕",
+      exitBottom: "יציאה — ההתקדמות נשמרת",
+      continueBtn: "הבנתי, ממשיכות ✓",
     },
 
     summary: {
@@ -376,6 +384,8 @@
       importCancelBtn: "ביטול",
       importPinPrompt: "הקלידו קוד לאישור",
       undoBtn: "ביטול הפעולה האחרונה",
+      restoreLocalBtn: function (n) { return "שחזור מהעותק המקומי (" + bdi(n) + " סבבים)"; },
+      restoredMsg: "שוחזר בהצלחה",
       undoneMsg: "בוטל בהצלחה",
       resetBtn: "איפוס כל הנתונים",
       resetConfirmPrompt: "כדי לאפס, הקלידו \"מחק\" והכניסו קוד",
@@ -486,13 +496,13 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.6.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.7.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
   // ------------------------------------------------------------------
   var mapSelectedStation = null; // journey map: tapped station (reset when leaving the map)
-  var App = { storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null, updateAvailable: false };
+  var App = { pendingContinue: null, storage: null, channel: null, questionTimer: null, feedbackLock: false, lastSessionResult: null, parentUnlocked: false, pendingImport: null, updateAvailable: false };
   window.App = App;
 
   function S() { return App.storage.state; }
@@ -601,6 +611,7 @@
   function route() {
     clearInterval(challengeTimerHandle); // never leave a challenge timer running behind a navigated-away screen
     clearTimeout(App.feedbackTimer); // P9: a pending answer-feedback timer must not paint a question over another screen
+    App.pendingContinue = null;
     App.feedbackLock = false;
     var layers = document.querySelectorAll(".confetti-layer, .fireworks");
     for (var li = 0; li < layers.length; li++) layers[li].parentNode.removeChild(layers[li]);
@@ -653,9 +664,15 @@
   // Screen: Parent setup (D15) — gates everything else until pinHash is set.
   // ------------------------------------------------------------------
   Screens.parentSetup = function () {
+    var snapshot = App.storage.readLastGood();
+    var snapSessions = snapshot && snapshot.state && Array.isArray(snapshot.state.sessions) ? snapshot.state.sessions.length : 0;
+    var restoreHtml = snapSessions > 0
+      ? '<div class="restore-banner">' + T.parentSetup.restoreFound(snapSessions) + '<br><br><button data-action="restore-lastgood">' + T.parentSetup.restoreBtn + "</button></div>"
+      : "";
     render(
       '<div class="screen" data-screen="parent-setup">' +
         '<div class="card" style="width:min(420px,92vw)">' +
+        restoreHtml +
         "<h1>" + T.parentSetup.title + "</h1>" +
         '<div class="muted" id="setup-error" style="min-height:1.2em"></div>' +
         '<label>' + T.parentSetup.nameLabel + '<br>' +
@@ -668,6 +685,9 @@
         "</div></div>"
     );
     document.querySelector('[data-action="setup-continue"]').addEventListener("click", onSetupContinue);
+    bindAction("restore-lastgood", function () {
+      App.storage.restoreLastGood(Date.now()).then(function (result) { if (result.ok) route(); });
+    });
   };
 
   function onSetupContinue() {
@@ -884,11 +904,13 @@
         '<div class="question-input">' +
         (coarse ? renderNumpad() : "") +
         '<button class="ghost" data-action="toggle-keyboard">' + (coarse ? T.question.showKeyboard : T.question.showNumpad) + "</button>" +
+        '<button class="ghost" data-action="exit-bottom">' + T.question.exitBottom + "</button>" +
         "</div>" +
         "</div>"
     );
 
     bindAction("exit", onExitClick);
+    bindAction("exit-bottom", onExitClick);
     bindAction("toggle-keyboard", function () {
       save(function (s) { s.settings.forceNumpad = !coarse; }).then(renderQuestion);
     });
@@ -929,7 +951,11 @@
   }
 
   function onKeyboardKeydown(ev) {
-    if (App.feedbackLock) { ev.preventDefault(); return; }
+    if (App.feedbackLock) {
+      ev.preventDefault();
+      if (ev.key === "Enter" && !ev.repeat && App.pendingContinue) App.pendingContinue();
+      return;
+    }
     if (ev.key === "Enter") {
       if (ev.repeat) { ev.preventDefault(); return; } // holding Enter must not repeat-submit
       var current = document.getElementById("answer-input").value;
@@ -1052,6 +1078,15 @@
       note.className = "muted";
       note.textContent = T.question.retryNowYouKnow; // P1: a correct retry gets its line
     }
+    if (!result.ok) {
+      // The picture stays until she taps "הבנתי" (or presses Enter) — no auto-advance,
+      // so there is time to count the rows (Marat, 2026-08-27).
+      var btn = document.createElement("button");
+      btn.className = "continue-btn";
+      btn.textContent = T.question.continueBtn;
+      btn.setAttribute("data-action", "continue-after-wrong");
+      note.appendChild(btn);
+    }
     if (equation && note.textContent) equation.parentNode.insertBefore(note, equation.nextSibling);
     if (fast) {
       var t = document.getElementById("turtle");
@@ -1066,8 +1101,10 @@
       else { blip(SOUNDS.wrong); }
     } catch (e) { /* effects are decoration; the session must advance regardless */ }
     clearTimeout(App.feedbackTimer);
-    App.feedbackTimer = setTimeout(function () {
+    App.pendingContinue = null;
+    var advance = function () {
       if (currentHashScreen() !== "question") return; // P9: the child left mid-feedback
+      App.pendingContinue = null;
       App.feedbackLock = false;
       var state = S();
       if (!state.active) { finishSession(); return; }
@@ -1076,7 +1113,15 @@
       } else {
         paintNextQuestion();
       }
-    }, result.ok ? CONFIG.WRONG_ANSWER_DISPLAY_MS : CONFIG.WRONG_ANSWER_HELPER_MS);
+    };
+    if (result.ok) {
+      App.feedbackTimer = setTimeout(advance, CONFIG.WRONG_ANSWER_DISPLAY_MS);
+    } else {
+      App.pendingContinue = advance; // wrong answer: wait for "הבנתי" / Enter
+      var cont = document.querySelector('[data-action="continue-after-wrong"]');
+      if (cont) cont.addEventListener("click", function () { if (App.pendingContinue) App.pendingContinue(); });
+      if (cont && cont.focus) cont.focus();
+    }
   }
 
   function finishSession() {
@@ -1752,7 +1797,12 @@
       '<button data-action="export-data">' + T.parent.exportBtn + "</button> " +
       '<button class="secondary" data-action="trigger-import">' + T.parent.importBtn + "</button>" +
       '<input id="import-file-input" type="file" accept="application/json" style="display:none" /><br><br>' +
-      '<button class="secondary" data-action="undo-last">' + T.parent.undoBtn + "</button><br><br>" +
+      '<button class="secondary" data-action="undo-last">' + T.parent.undoBtn + "</button> " +
+      (function () {
+        var snap = App.storage.readLastGood();
+        var n = snap && snap.state && Array.isArray(snap.state.sessions) ? snap.state.sessions.length : 0;
+        return n > (state.sessions || []).length ? '<button class="secondary" data-action="restore-lastgood">' + T.parent.restoreLocalBtn(n) + "</button>" : "";
+      })() + "<br><br>" +
       '<button class="ghost" data-action="show-reset">' + T.parent.resetBtn + "</button>" +
       '<div id="data-section-msg" class="muted" style="min-height:1.2em"></div>' +
       '<div id="import-preview-area"></div>' +
@@ -1805,6 +1855,11 @@
       reader.readAsText(file);
     });
 
+    bindAction("restore-lastgood", function () {
+      App.storage.restoreLastGood(Date.now()).then(function (result) {
+        if (result.ok) { document.getElementById("data-section-msg").textContent = T.parent.restoredMsg; renderParentDashboard(); }
+      });
+    });
     bindAction("undo-last", function () {
       App.storage.undoLastReplace(Date.now()).then(function (result) {
         if (result.ok) {

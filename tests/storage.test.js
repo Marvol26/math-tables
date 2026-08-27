@@ -189,3 +189,58 @@ test("a failed save (IDB throwing) leaves in-memory state (incl. active) intact 
 
   storage.db = realDb;
 });
+
+// --- 2026-08-27: ratchet snapshot (last-good) ---
+
+// --- 2026-08-27: last-good ratchet snapshot (data-loss guard) ---
+function stateWithSessions(n) {
+  const s = seedState();
+  for (let i = 0; i < n; i++) s.sessions.push({ id: "s_" + i, startedAt: i, endedAt: i + 1, planned: ["1x2"], attempts: [], firstTryCorrect: 1, totalMs: 1, misses: [], coinsEarned: 1, perfect: false, masteredAfter: 0, unlocksEarned: [] });
+  return s;
+}
+
+test("[lastgood] the snapshot never shrinks: a fresh empty state cannot overwrite a state with sessions", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d1" });
+  await a.load();
+  a.state = stateWithSessions(5);
+  await a.save((s) => { s.settings.sound = false; }, 100);
+  assert.equal(a.readLastGood().state.sessions.length, 5);
+  // a new, empty IDB (as if wiped) + a boot that saves an empty state must not touch the snapshot
+  const b = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d1" });
+  localStorage.removeItem("mathtrainer.v1.mirror"); // mirror gone too
+  await b.load();
+  b.state = Migrate.emptyState();
+  await b.save((s) => { s.settings.pinHash = "new:pin"; }, 200);
+  assert.equal(b.readLastGood().state.sessions.length, 5, "snapshot still holds the 5 sessions");
+});
+
+test("[lastgood] restoreLastGood brings the sessions back and keeps the PIN the parent just set", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d2" });
+  await a.load();
+  a.state = stateWithSessions(3);
+  a.state.settings.pinHash = "old:pin";
+  await a.save((s) => { s.settings.sound = true; }, 100);
+  const b = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d2" });
+  localStorage.removeItem("mathtrainer.v1.mirror");
+  await b.load();
+  b.state = Migrate.emptyState();
+  await b.save((s) => { s.settings.pinHash = "new:pin"; s.settings.recoveryHash = "new:rec"; }, 200);
+  const r = await b.restoreLastGood(300);
+  assert.equal(r.ok, true);
+  assert.equal(b.state.sessions.length, 3);
+  assert.equal(b.state.settings.pinHash, "new:pin");
+  assert.equal(b.state.settings.recoveryHash, "new:rec");
+  assert.equal(b.state.settings.childName, "נועה");
+});
+
+test("[lastgood] a state with more sessions advances the snapshot", async () => {
+  const localStorage = makeLocalStorage();
+  const a = Storage.create({ indexedDB: new IDBFactory(), localStorage, dbName: "d3" });
+  await a.load();
+  a.state = stateWithSessions(2);
+  await a.save((s) => {}, 100);
+  await a.save((s) => { s.sessions.push({ id: "s_x", startedAt: 9, endedAt: 10, planned: ["1x2"], attempts: [], firstTryCorrect: 1, totalMs: 1, misses: [], coinsEarned: 1, perfect: false, masteredAfter: 0, unlocksEarned: [] }); }, 200);
+  assert.equal(a.readLastGood().state.sessions.length, 3);
+});

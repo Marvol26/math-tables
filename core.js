@@ -1162,6 +1162,10 @@
   var RECORD_ID = "state";
   var BACKUP_ID = "backup";
   var MIRROR_KEY = "mathtrainer.v1.mirror";
+  // Ratchet snapshot: only ever replaced by a state with at least as many
+  // sessions, so an empty/fresh state (transient IDB failure at boot, a re-run
+  // parent setup, an accidental reset) can never wipe the last real progress.
+  var LASTGOOD_KEY = "mathtrainer.v1.lastgood";
 
   function idbOpen(idbFactory, dbName) {
     return new Promise(function (resolve, reject) {
@@ -1250,6 +1254,40 @@
     try {
       this.localStorage.setItem(MIRROR_KEY, JSON.stringify({ rev: this.rev, state: this.state }));
     } catch (e) { /* mirror is best-effort */ }
+    this._ratchet();
+  };
+
+  function sessionCount(state) {
+    return state && Array.isArray(state.sessions) ? state.sessions.length : 0;
+  }
+
+  StorageInstance.prototype._ratchet = function () {
+    try {
+      var existing = this.readLastGood();
+      if (existing && sessionCount(existing.state) > sessionCount(this.state)) return; // never shrink
+      this.localStorage.setItem(LASTGOOD_KEY, JSON.stringify({ rev: this.rev, savedAt: this.state && this.state.savedAt, state: this.state }));
+    } catch (e) { /* best-effort */ }
+  };
+
+  StorageInstance.prototype.readLastGood = function () {
+    try {
+      var raw = this.localStorage.getItem(LASTGOOD_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  };
+
+  // Restores the ratchet snapshot over the current state (through the same
+  // atomic backup-then-replace path as import), keeping the CURRENT device
+  // PIN/recovery when the current state has them (the parent just typed them).
+  StorageInstance.prototype.restoreLastGood = function (now) {
+    var snapshot = this.readLastGood();
+    if (!snapshot || !snapshot.state) return Promise.resolve({ ok: false, error: "no snapshot" });
+    var restored = Migrate.migrate(snapshot.state);
+    if (this.state && this.state.settings && this.state.settings.pinHash) {
+      restored.settings.pinHash = this.state.settings.pinHash;
+      restored.settings.recoveryHash = this.state.settings.recoveryHash;
+    }
+    return this.backupThenReplace(restored, now);
   };
 
   StorageInstance.prototype._readMirror = function () {

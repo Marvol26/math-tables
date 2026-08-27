@@ -3,11 +3,11 @@
 // both busts the cache and drives the "update available" toast (DESIGN §11).
 "use strict";
 
-var VERSION = "v7";
+var VERSION = "v8";
 var CACHE_NAME = "mathtrainer-" + VERSION;
 // core.js is referenced as core.js?v=<APP_VERSION> from index.html so an
 // uncontrolled load can never pair a fresh page with an HTTP-cached old core.
-var PRECACHE_URLS = ["./", "index.html", "core.js", "core.js?v=0.6.0", "manifest.webmanifest", "icon-180.png", "icon-512.png"];
+var PRECACHE_URLS = ["./", "index.html", "core.js", "core.js?v=0.7.0", "manifest.webmanifest", "icon-180.png", "icon-512.png"];
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
