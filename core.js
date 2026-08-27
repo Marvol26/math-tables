@@ -1553,7 +1553,10 @@
       body.files[CLOUD_FILE] = { content: json };
       var url = cloud.gistId ? CLOUD_API + "/gists/" + encodeURIComponent(cloud.gistId) : CLOUD_API + "/gists";
       var method = cloud.gistId ? "PATCH" : "POST";
-      return fetchFn(url, { method: method, headers: cloudHeaders(cloud.token), body: JSON.stringify(body) })
+      var payload = JSON.stringify(body);
+      var opts = { method: method, headers: cloudHeaders(cloud.token), body: payload };
+      if (payload.length < 60000) opts.keepalive = true; // survives page suspension (browser limit ~64 KB)
+      return fetchFn(url, opts)
         .then(function (res) {
           if (res.status === 404 && cloud.gistId) {
             // the gist was deleted on GitHub: create a fresh one

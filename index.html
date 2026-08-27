@@ -412,7 +412,7 @@
       cloudTokenBad: function (e) { return "ה-Token לא עובד: " + e; },
       cloudBackupDone: "נשמר בענן ✓",
       cloudRestorePreview: function (d, n) { return "נמצא גיבוי בענן מ-" + bdi(d) + " (" + bdi(n) + " סבבים)"; },
-      cloudFoundExisting: "נמצא גיבוי קיים בחשבון — הוא לא נדרס. כדי להשתמש בו לחצו \"שחזור מהענן\"; הגיבוי האוטומטי ימשיך אחרי הסבב הבא.",
+      cloudFoundExisting: "נמצא בחשבון גיבוי גדול יותר מהמכשיר — הוא לא יידרס: הגיבויים החדשים יישמרו בנפרד עד שתלחצו \"שחזור מהענן\".",
       cloudRestoreConfirmBtn: "אישור שחזור",
       cloudRestoreWarnSmaller: "שימו לב: בענן פחות סבבים מאשר במכשיר",
       cloudEmptySkipped: "אין עדיין סבבים — הגיבוי יתחיל אחרי הסבב הראשון",
@@ -1968,9 +1968,14 @@
       msg(T.parent.cloudChecking);
       MathCore.Cloud.verifyToken(window.fetch.bind(window), token).then(function (v) {
         if (!v.ok) { msg(T.parent.cloudTokenBad(v.error)); return; }
-        return MathCore.Cloud.findGist(window.fetch.bind(window), token).then(function (f) {
-          return save(function (s) { s.settings.cloud = { token: token, gistId: f.ok ? f.gistId : null, lastOkAt: null, lastError: null }; }).then(function () {
-            if (f.ok) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.cloudFoundExisting; return; } // existing backup is never overwritten on connect
+        // Adopt an existing backup gist only when this device already holds at
+        // least as much history; otherwise future backups go to a NEW gist and
+        // the bigger cloud copy stays untouched until the parent restores it.
+        return cloudPeek(token, null).then(function (peek) {
+          var local = (S().sessions || []).length;
+          var adopt = peek.ok && peek.sessions <= local;
+          return save(function (s) { s.settings.cloud = { token: token, gistId: adopt ? peek.gistId : null, lastOkAt: null, lastError: null }; }).then(function () {
+            if (peek.ok && !adopt) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.cloudFoundExisting + " " + T.parent.cloudRestorePreview(new Date(peek.updatedAt).toLocaleString("he-IL"), peek.sessions); return; }
             return cloudBackupNow().then(function (r) { renderParentDashboard(); var el2 = document.getElementById("cloud-msg"); if (el2 && r.skipped) el2.textContent = r.error; });
           });
         });
