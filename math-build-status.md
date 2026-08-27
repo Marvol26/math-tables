@@ -313,3 +313,9 @@ evidence: served locally (`python3 -m http.server 8766`), SW unregistered + cach
 - `Stats.totals().masteredCount`, `map.reached`, and station progress (8/10 at ×1) were unchanged by any of the falling sessions played in this pass.
 deviations: the true "tap before landing → ×2 badge" case could not be reliably demonstrated through browser-automation click latency (every automated tap landed after the multi-second round-trip of screenshot+click, confirmed twice) — the underlying mechanism (SessionCore.submit's `withinLimit` from real `Date.now()` timestamps, wired via `active.settingsSnapshot.challengeOn/timeLimitSec`) is unit-tested (F1-2) and identical to the already-shipped Challenge Mode's ×2 path; a real (non-automated) tap well under the fall duration will trigger it exactly as Challenge Mode does today. The F3-2 precise multi-viewport matrix remains only partially verified per the WP-F3 entry (resize_window tool limitation) — carried to NEXT-ACTIONS.md.
 assumptions discovered: none new.
+
+## 2026-08-27T15:20:00Z · falling-numbers WP-F6 · tests + status log · DONE
+commit: b1470a1
+evidence: `npm test` → 130/130 (≥125 target met: 110 baseline + 5 F1-1 distractor tests + 5 F1-2 session tests + 9 F1-3 migrate/stats tests + 1 F1-gate regression test). Every WP-F1..F5 step has its own status-log entry above, each with commit, evidence, deviations, and assumptions-discovered fields per the plan's §8 format.
+deviations: none
+assumptions discovered: none
