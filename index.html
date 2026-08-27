@@ -168,34 +168,84 @@
     [data-screen="question"] .turtle-track { width: min(260px, 38vw); height: 36px; }
     [data-screen="question"] .dot-array { --dot: 7px; gap: 2px; }
   }
-  /* Falling numbers mode (docs/FALLING-DESIGN.md) */
-  .lanes { position: relative; width: min(480px, 94vw); height: clamp(220px, 42vh, 420px); display: flex; direction: ltr; unicode-bidi: isolate; }
-  .lane { flex: 1; position: relative; height: 100%; }
-  .bubble {
-    position: absolute; top: -70px; left: 50%; transform: translateX(-50%);
-    width: 64px; height: 64px; border-radius: 50%;
-    background: var(--primary); color: #fff; font-weight: bold; font-size: 1.2rem;
-    display: flex; align-items: center; justify-content: center;
-    border: none; cursor: pointer; padding: 0; box-shadow: 0 3px 8px rgba(0,0,0,0.15);
-    animation: bubble-fall var(--fall, 8s) linear forwards;
+  /* Falling numbers mode (docs/FALLING-DESIGN.md) — balloon visuals 2026-08-27 */
+  [data-screen="question"][data-falling="1"] {
+    justify-content: flex-start; gap: 0.6rem;
+    background: linear-gradient(180deg, #DDF1FF 0%, #F3FAFF 55%, #FFF8F0 100%);
+    overflow: hidden;
   }
-  @keyframes bubble-fall { from { top: -70px; } to { top: calc(100% - 64px); } }
-  /* Applied at render (interrupted resume / reduced motion) OR after animationend
-     fires naturally — either way the bubble must sit at the bottom immediately,
-     never mid-fall (docs/FALLING-DESIGN.md F10: a resumed question renders
-     "already landed", not replaying the fall). */
-  .bubble.landed { animation: none; top: calc(100% - 64px); box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
-  .falling-landed-label { min-height: 1.2em; }
+  [data-screen="question"][data-falling="1"] .question-info {
+    position: relative; z-index: 3; background: rgba(255,255,255,0.92); border-radius: 20px;
+    padding: 0.6rem 1.2rem; box-shadow: 0 6px 18px rgba(79,124,255,0.12); margin-top: 1.6rem;
+  }
+  .cloud { position: absolute; z-index: 0; width: 120px; height: 44px; background: #fff; border-radius: 40px; opacity: 0.85; pointer-events: none;
+    animation: cloud-drift var(--cd, 40s) linear infinite; }
+  .cloud::before, .cloud::after { content: ""; position: absolute; background: #fff; border-radius: 50%; }
+  .cloud::before { width: 56px; height: 56px; left: 18px; top: -26px; }
+  .cloud::after { width: 40px; height: 40px; left: 62px; top: -16px; }
+  @keyframes cloud-drift { from { transform: translateX(-160px); } to { transform: translateX(110vw); } }
+  .lanes { position: relative; z-index: 1; width: min(520px, 96vw); flex: 1; min-height: 200px; height: clamp(220px, 46vh, 460px);
+    display: flex; direction: ltr; unicode-bidi: isolate; overflow: hidden; }
+  .lanes::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; border-radius: 14px 14px 0 0;
+    background: linear-gradient(180deg, #8FD97A, #5FBF62); z-index: 0; }
+  .lane { flex: 1; position: relative; height: 100%; }
+  .lane:nth-child(6n+1) { --c: #FF6F91; --ct: #fff; }
+  .lane:nth-child(6n+2) { --c: #4F7CFF; --ct: #fff; }
+  .lane:nth-child(6n+3) { --c: #3CC97A; --ct: #fff; }
+  .lane:nth-child(6n+4) { --c: #FFC93C; --ct: #2B2D42; }
+  .lane:nth-child(6n+5) { --c: #B388FF; --ct: #fff; }
+  .lane:nth-child(6n+6) { --c: #FF9F68; --ct: #2B2D42; }
+  .bubble {
+    position: absolute; top: -110px; left: 50%; z-index: 1;
+    width: 68px; height: 78px; padding: 0; border: none; cursor: pointer;
+    border-radius: 50% 50% 50% 50% / 46% 46% 54% 54%;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.75) 0, rgba(255,255,255,0.25) 22%, var(--c) 48%, color-mix(in srgb, var(--c) 78%, #000) 100%);
+    color: var(--ct); font: inherit; font-weight: bold; font-size: 1.35rem;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.18), inset -6px -8px 14px rgba(0,0,0,0.12);
+    transform-origin: 50% 110%;
+    animation: bubble-fall var(--fall, 8s) linear forwards, sway 2.2s ease-in-out infinite;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bubble::before { content: ""; position: absolute; left: 50%; bottom: -7px; width: 10px; height: 10px; background: var(--c);
+    transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+  .bubble::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 30px; margin-top: 6px;
+    background: rgba(43,45,66,0.35); border-radius: 2px; }
+  @keyframes bubble-fall { from { top: -110px; } to { top: calc(100% - 118px); } }
+  @keyframes sway { 0%, 100% { transform: translateX(-50%) rotate(-6deg); } 50% { transform: translateX(-50%) rotate(6deg); } }
+  @keyframes bob { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-6px); } }
+  .bubble.landed:not(.popped):not(.flyaway):not(.wrongpick):not(.reveal) { animation: bob 2.4s ease-in-out infinite; }
+  .bubble.landed { top: calc(100% - 118px); }
+  /* reactions */
+  .bubble.popped { animation: pop-balloon 0.55s ease-out forwards; pointer-events: none; opacity: 0; }
+  @keyframes pop-balloon { 0% { transform: translateX(-50%) scale(1); opacity: 1; } 40% { transform: translateX(-50%) scale(1.35); opacity: 1; } 100% { transform: translateX(-50%) scale(1.9); opacity: 0; } }
+  .bubble.flyaway { animation: fly-away 0.9s ease-in forwards; pointer-events: none; opacity: 0.2; }
+  @keyframes fly-away { to { transform: translateX(-50%) translateY(-140vh) rotate(8deg); opacity: 0.2; } }
+  .bubble.wrongpick { animation: deflate 0.6s ease-out forwards; filter: grayscale(0.8); pointer-events: none; }
+  @keyframes deflate { 0% { transform: translateX(-50%) scale(1) rotate(0); } 30% { transform: translateX(-42%) scale(0.95) rotate(-8deg); } 60% { transform: translateX(-58%) scale(0.8) rotate(8deg); } 100% { transform: translateX(-50%) scale(0.55) rotate(0); opacity: 0.5; } }
+  .bubble.reveal { animation: bob 1.2s ease-in-out infinite; box-shadow: 0 0 0 5px #FFC93C, 0 0 24px 8px rgba(255,201,60,0.7); pointer-events: none; }
+  .pop-burst { position: absolute; z-index: 2; font-size: 2.2rem; pointer-events: none; animation: pop 0.7s ease-out forwards; transform: translate(-50%, -50%); }
+  .falling-landed-label { min-height: 1.4em; z-index: 3; }
+  .falling-landed-label:not(:empty) { background: rgba(255,255,255,0.9); border-radius: 999px; padding: 0.3rem 0.9rem; }
   @media (prefers-reduced-motion: reduce) {
-    .bubble { animation: none; top: calc(100% - 64px); }
+    .bubble, .bubble.landed { animation: none; top: calc(100% - 118px); }
+    .cloud { animation: none; }
+    .bubble.popped, .bubble.flyaway, .bubble.wrongpick { animation: none; opacity: 0.3; }
   }
   @media (max-width: 380px) {
-    .bubble { width: 56px; height: 56px; font-size: 1.05rem; }
+    .bubble { width: 56px; height: 64px; font-size: 1.1rem; }
+    @keyframes bubble-fall { from { top: -100px; } to { top: calc(100% - 104px); } }
+    .bubble.landed { top: calc(100% - 104px); }
   }
   @media (max-height: 420px) and (min-width: 480px) {
-    [data-screen="question"][data-falling="1"] { flex-direction: column; }
-    [data-screen="question"][data-falling="1"] .lanes { height: clamp(140px, 32vh, 260px); width: min(420px, 70vw); }
-    [data-screen="question"][data-falling="1"] .bubble { width: 48px; height: 48px; font-size: 0.95rem; }
+    [data-screen="question"][data-falling="1"] { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; padding: 0.4rem 0.8rem; }
+    [data-screen="question"][data-falling="1"] .question-info { margin-top: 0; }
+    [data-screen="question"][data-falling="1"] .lanes { height: calc(100dvh - 1.2rem); min-height: 0; flex: 0 0 auto; width: min(440px, 58vw); }
+    [data-screen="question"][data-falling="1"] .falling-landed-label { width: 100%; text-align: center; }
+    [data-screen="question"][data-falling="1"] .bubble { width: 48px; height: 56px; font-size: 1rem; }
+    [data-screen="question"][data-falling="1"] .bubble::after { height: 16px; }
+    @keyframes bubble-fall { from { top: -90px; } to { top: calc(100% - 92px); } }
+    [data-screen="question"][data-falling="1"] .bubble.landed { top: calc(100% - 92px); }
   }
   #stale-card {
     display: none;
@@ -234,7 +284,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.8.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.9.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -629,7 +679,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.8.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.9.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -1179,7 +1229,10 @@
 
     render(
       '<div class="screen" data-screen="question" data-falling="1" style="--fall:' + durationSec + 's">' +
-        '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem">' + T.question.exitButton + "</button>" +
+        '<div class="cloud" style="top:8%;--cd:46s;animation-delay:-12s"></div>' +
+        '<div class="cloud" style="top:30%;--cd:60s;animation-delay:-35s;transform:scale(0.7)"></div>' +
+        '<div class="cloud" style="top:55%;--cd:52s;animation-delay:-5s;opacity:0.6"></div>' +
+        '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem;z-index:4">' + T.question.exitButton + "</button>" +
         '<div class="question-info">' +
         '<div class="dots">' + dotsHtml + "</div>" +
         '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
@@ -1201,7 +1254,9 @@
     var bubbleEls = document.querySelectorAll(".bubble");
     bubbleEls.forEach(function (btn) {
       if (!visuallyLanded) {
-        btn.addEventListener("animationend", function () {
+        btn.addEventListener("animationend", function (ev) {
+          if (ev.animationName !== "bubble-fall") return; // sway/pop/deflate ends must not mark "landed"
+          if (btn.classList.contains("popped") || btn.classList.contains("flyaway") || btn.classList.contains("wrongpick")) return;
           btn.classList.add("landed");
           var allLanded = Array.prototype.every.call(document.querySelectorAll(".bubble"), function (b) { return b.classList.contains("landed"); });
           if (allLanded) {
@@ -1212,6 +1267,7 @@
       }
       btn.addEventListener("click", function () {
         if (App.feedbackLock) return;
+        btn.classList.add("picked");
         submitAnswer(Number(btn.dataset.value));
       });
     });
@@ -1225,7 +1281,7 @@
       var n = Number(ev.key);
       if (!n || n < 1 || n > options) return;
       var btn = document.querySelector('.bubble[data-lane="' + (n - 1) + '"]');
-      if (btn) submitAnswer(Number(btn.dataset.value));
+      if (btn) { btn.classList.add("picked"); submitAnswer(Number(btn.dataset.value)); }
     };
     document.addEventListener("keydown", fallingKeyHandler);
   }
@@ -1388,7 +1444,7 @@
     }
     App.feedbackLock = true;
     clearInterval(challengeTimerHandle);
-    document.querySelectorAll(".bubble").forEach(function (b) { b.style.animationPlayState = "paused"; });
+    document.querySelectorAll(".bubble").forEach(function (b) { if (!b.classList.contains("picked")) b.style.animationPlayState = "paused"; });
     var submitResult = null;
     save(function (s) { submitResult = MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); })
       .then(function (result) {
@@ -1396,6 +1452,37 @@
         showFeedback(submitResult);
       })
       .catch(function () { App.feedbackLock = false; }); // a rejected save must never strand the lock
+  }
+
+  // Falling mode: the tapped balloon pops (right) or deflates (wrong); the
+  // others float away, or the correct one glows so she sees it.
+  function balloonReactions(result) {
+    var bubbles = Array.prototype.slice.call(document.querySelectorAll(".bubble"));
+    var picked = bubbles.filter(function (b) { return b.classList.contains("picked"); })[0];
+    bubbles.forEach(function (b) { b.style.animationPlayState = ""; b.classList.remove("landed"); });
+    if (result.ok) {
+      bubbles.forEach(function (b) {
+        if (b === picked) {
+          var rect = b.getBoundingClientRect();
+          b.classList.add("popped");
+          var burst = document.createElement("div");
+          burst.className = "pop-burst";
+          burst.textContent = "🎉";
+          burst.style.left = (rect.left + rect.width / 2) + "px";
+          burst.style.top = (rect.top + rect.height / 2) + "px";
+          burst.style.position = "fixed";
+          document.body.appendChild(burst);
+          setTimeout(function () { if (burst.parentNode) burst.parentNode.removeChild(burst); }, 900);
+        } else { b.classList.add("flyaway"); }
+      });
+    } else {
+      bubbles.forEach(function (b) {
+        if (b === picked) b.classList.add("wrongpick");
+        else if (Number(b.dataset.value) === Number(result.correctAnswer)) b.classList.add("reveal");
+        else b.style.opacity = "0.45";
+        b.style.pointerEvents = "none";
+      });
+    }
   }
 
   function showFeedback(result) {
@@ -1406,6 +1493,7 @@
       screenEl.classList.add(result.ok ? "feedback-correct" : "feedback-wrong");
       if (fast) screenEl.classList.add("feedback-fast"); // classList.add takes one token per argument
     }
+    if (screenEl && screenEl.dataset.falling) balloonReactions(result);
     var equation = document.getElementById("equation");
     var note = document.createElement("div");
     if (!result.ok) {
