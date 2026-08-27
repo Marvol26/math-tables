@@ -1,6 +1,6 @@
 # לוח הכפל
 
-משחק לתרגול לוח הכפל (1×1 עד 10×10) בעברית, לילדה בת 8. תשובות מוקלדות, בלי רמזים, מטבעות על כל שאלה, אוסף מדבקות, פרסים אמיתיים שההורים מגדירים, מצב אתגר עם צב שהולך לדגל (אופציונלי, לעולם לא מעניש), ציור של נקודות אחרי טעות, ומפת מסע עם 10 תחנות — תחנה לכל לוח (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×7 → ×8 → ×9) שנדלקת כשכל 10 התרגילים שלה נלמדו לגמרי; תחנה שהושגה לא נכבית. מסך הורים נעול בקוד עם סטטיסטיקות, ניהול פרסים וגיבוי.
+משחק לתרגול לוח הכפל (1×1 עד 10×10) בעברית, לילדה בת 8. תשובות מוקלדות, בלי רמזים, מטבעות על כל שאלה, אוסף מדבקות, פרסים אמיתיים שההורים מגדירים, מצב אתגר עם צב שהולך לדגל (אופציונלי, לעולם לא מעניש), ציור של נקודות אחרי טעות, ומפת מסע עם 10 תחנות — תחנה לכל לוח (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7) שנדלקת כשכל 10 התרגילים שלה נלמדו לגמרי; תחנה שהושגה לא נכבית. מסך הורים נעול בקוד עם סטטיסטיקות, ניהול פרסים וגיבוי.
 
 🔗 **המשחק חי כאן:** https://marvol26.github.io/math-tables/
 
@@ -20,6 +20,16 @@
 - **ייבוא מקובץ** — משחזר מקובץ גיבוי. יוצג תצוגה מקדימה (כמה סבבים, כמה מטבעות) לפני האישור, ותידרש הקלדת קוד ההורים.
 - **ביטול הפעולה האחרונה** — משחזר את המצב שהיה קיים ממש לפני הייבוא או האיפוס האחרון (שלב אחד בלבד לאחור).
 - **איפוס כל הנתונים** — מוחק את כל ההתקדמות אך שומר את קוד ההורים. דורש הקלדת המילה "מחק" בדיוק, בנוסף לקוד.
+
+## גיבוי אוטומטי לענן (מומלץ)
+האפליקציה יכולה לשמור אחרי כל סבב עותק ב-Gist **פרטי** בחשבון GitHub שלכם — בלי שרת ובלי סיסמאות בקוד.
+1. ב-GitHub: Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token. סמנו **רק** את ההרשאה `gist`. בחרו תפוגה ארוכה (או No expiration).
+2. באפליקציה: הורים → קוד → **גיבוי אוטומטי לענן** → הדביקו את ה-Token → **שמירה ובדיקה**. מעכשיו כל סבב שמסתיים מגובה אוטומטית.
+3. במכשיר חדש: במסך ההגדרה הראשון הדביקו את אותו Token → **שחזור מהענן**, ואז בחרו שם וקוד.
+ה-Token נשמר רק על המכשיר (לא בקובץ הייצוא ולא בקוד). אם ה-Token דלף — מחקו אותו ב-GitHub וצרו חדש.
+
+## ייצוא ידני ב-iPad
+לחיצה על **ייצוא גיבוי** פותחת את חלון השיתוף של iOS — בחרו **Save to Files / שמירה בקבצים** ושמרו ב-iCloud Drive. (פתיחה רגילה של הקובץ בדפדפן מציגה אותו בלבד ואינה שומרת.)
 
 ## שכחתי קוד הורים
 
@@ -42,7 +52,7 @@ python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפ
 
 # Math Tables (לוח הכפל)
 
-A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×7 → ×8 → ×9) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
+A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
 
 🔗 **Live at:** https://marvol26.github.io/math-tables/
 
@@ -62,6 +72,16 @@ In the parent view (the PIN you set at install):
 - **Import from file** — restores from a backup file. Shows a preview (session count, coin total) before confirming, and requires the parent PIN.
 - **Undo last action** — restores the state from immediately before the last import or reset (one level back only).
 - **Reset all data** — wipes all progress but keeps the parent PIN. Requires typing the exact word "מחק" (delete) plus the PIN.
+
+## Automatic cloud backup (recommended)
+After every session the app can save a copy to a **private Gist** in your GitHub account — no server, no secrets in the code.
+1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token with **only** the `gist` scope (long or no expiration).
+2. In the app: parents → PIN → **גיבוי אוטומטי לענן** → paste the token → **שמירה ובדיקה**. Every completed session is then backed up automatically.
+3. On a new device: on the first setup screen paste the same token → **שחזור מהענן**, then choose a name and PIN.
+The token lives only on the device (never in export files or the code). If it leaks, revoke it on GitHub and create a new one.
+
+## Manual export on iPad
+**ייצוא גיבוי** opens the iOS share sheet — choose **Save to Files** (iCloud Drive). Opening the file in the browser only previews it and does not save.
 
 ## Forgot the parent PIN
 

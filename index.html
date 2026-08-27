@@ -98,6 +98,7 @@
   @keyframes dot-in { to { opacity: 1; transform: scale(1); } }
   .dot-array-caption { font-weight: bold; color: var(--text); }
   .continue-btn { margin-top: 0.6rem; }
+  .strategy { font-size: 1rem; color: var(--text); }
   .restore-banner { background: var(--gold); border-radius: 16px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
   .chart-value { font: 10px sans-serif; fill: #2B2D42; }
   /* Journey map (docs/MAP-DESIGN.md) */
@@ -270,6 +271,8 @@
       timeoutMessage: "הצב הגיע ונח 😴 — אפשר לאט 🙂",
       helperCaption: function (a, b, product) { return a + " × " + b + " = " + product; },
       helperRows: function (a, b) { return a === 1 ? "שורה אחת של " + bdi(b) : bdi(a) + " שורות של " + bdi(b); },
+      strategyIntro: "דרך קלה לזכור:",
+      commutative: function (a, b, p) { return "וגם " + '<span class="ltr">' + b + " × " + a + " = " + p + "</span>"; },
       interruptedLabel: "ממשיכות בלי שעון",
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
@@ -1099,6 +1102,33 @@
   // Wrong-answer helper: the fact as `a` rows of `b` dots, lighting up row by
   // row, captioned "a × b = product". Shown only AFTER a wrong answer (D3: no
   // clues while answering) — it explains, it never hints.
+  // A one-line derivation strategy for the fact (research-based: doubles,
+  // ×9 = ×10 − one, ×5 = half of ×10, ×6/×7 built from ×5). Picks the operand
+  // with the most useful trick. Numbers only — no user input.
+  function strategyHint(a, b) {
+    var order = [10, 9, 5, 2, 4, 8, 3, 6, 7, 1];
+    var n = null, m = null;
+    for (var i = 0; i < order.length; i++) {
+      if (a === order[i]) { n = a; m = b; break; }
+      if (b === order[i]) { n = b; m = a; break; }
+    }
+    if (n === null) return "";
+    var p = a * b;
+    var eq = function (parts) { return '<span class="ltr">' + parts + "</span>"; };
+    switch (n) {
+      case 10: return eq(m + " × 10 = " + m + "0") + " — מוסיפים 0";
+      case 9: return eq("10 × " + m + " − " + m + " = " + (10 * m) + " − " + m + " = " + p);
+      case 5: return eq("10 × " + m + " = " + (10 * m) + ", חצי = " + p);
+      case 2: return eq(m + " + " + m + " = " + p);
+      case 4: return eq("2 × " + m + " = " + (2 * m) + ", כפול 2 = " + p);
+      case 8: return eq("4 × " + m + " = " + (4 * m) + ", כפול 2 = " + p);
+      case 3: return eq("2 × " + m + " + " + m + " = " + (2 * m) + " + " + m + " = " + p);
+      case 6: return eq("5 × " + m + " + " + m + " = " + (5 * m) + " + " + m + " = " + p);
+      case 7: return eq("5 × " + m + " + 2 × " + m + " = " + (5 * m) + " + " + (2 * m) + " = " + p);
+      default: return eq("1 × " + m + " = " + m);
+    }
+  }
+
   function dotArrayHtml(asked) {
     var p = MathCore.Facts.parts(asked);
     var rows = p[0], cols = p[1];
@@ -1113,6 +1143,8 @@
     // the bottom of the card below a short landscape viewport.
     return (
       '<div class="dot-array-caption ltr">' + T.question.helperCaption(rows, cols, rows * cols) + "</div>" +
+      (rows !== cols ? '<div class="muted">' + T.question.commutative(rows, cols, rows * cols) + "</div>" : "") +
+      '<div class="muted strategy">' + T.question.strategyIntro + " " + strategyHint(rows, cols) + "</div>" +
       '<div class="muted">' + T.question.helperRows(rows, cols) + "</div>" +
       '<div class="dot-array" style="grid-template-columns:repeat(' + cols + ',var(--dot))">' + cells + "</div>"
     );

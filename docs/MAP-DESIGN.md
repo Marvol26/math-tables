@@ -4,7 +4,7 @@ Extends DESIGN v4. Personal domain. Executor: designer session (Fable 5); closin
 
 ## 1. What it is
 A winding path with **10 stations, one per multiplication table**, in a learning order (not numeric):
-`×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×7 → ×8 → ×9`, ending at a 🏰. The child's 🐢 (same character as the countdown) stands at the station she is working on. Reached stations glow and keep a ⭐. A screen of its own ("המפה שלי 🗺️" on Home) plus a one-line status on Home.
+`×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7` (×9 moved before ×8/×7 on 2026-08-27 — research: the 9s pattern is the easiest of the hard tables), ending at a 🏰. The child's 🐢 (same character as the countdown) stands at the station she is working on. Reached stations glow and keep a ⭐. A screen of its own ("המפה שלי 🗺️" on Home) plus a one-line status on Home.
 
 ## 2. Rules (all numbers in CONFIG)
 - **Table n's facts** = the 10 facts `n×1 … n×10` (canonical keys `min×max`; facts shared between tables count for both).

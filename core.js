@@ -68,7 +68,7 @@
     HELPER_CASCADE_MS: 1100, // the dot rows light up over this much time, whatever the row count
 
     // Journey map (docs/MAP-DESIGN.md, Marat 2026-08-27)
-    MAP_PATH: [1, 2, 10, 5, 3, 4, 6, 7, 8, 9], // station order = learning order
+    MAP_PATH: [1, 2, 10, 5, 3, 4, 6, 9, 8, 7], // learning order; ×9 before ×8/×7 (digit-sum pattern makes it easy) — research 2026-08-27
     STATION_REQUIRED: 10, // mastered facts of the table needed to reach its station
     MAP_FOCUS_BONUS: 1.5, // added to the weakness score of the current station's facts
     ANIMATION_MAX_MS: 1800,

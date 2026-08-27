@@ -16,7 +16,7 @@ test("tableKeys: 10 facts per table, shared facts count for both tables", () => 
 });
 
 test("path order is the learning order and currentStation walks it", () => {
-  assert.deepEqual(CONFIG.MAP_PATH, [1, 2, 10, 5, 3, 4, 6, 7, 8, 9]);
+  assert.deepEqual(CONFIG.MAP_PATH, [1, 2, 10, 5, 3, 4, 6, 9, 8, 7]);
   const state = Migrate.emptyState();
   assert.equal(Map.currentStation(state), 1);
   state.map.reached[1] = 5;

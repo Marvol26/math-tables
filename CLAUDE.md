@@ -56,7 +56,8 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
    exists because an HTTP-cached stale `core.js` next to a fresh `index.html`
    froze feedback live on 2026-08-27; the SW also precaches with
    `cache: "reload"` for the same reason.
-8. **No `innerHTML` with unescaped user-provided data** (child name, reward
+8. **Egress:** the app contacts exactly one external host at runtime — `api.github.com`, for the parent's own private-Gist backup with a token the parent pasted (settings.cloud, device-local, stripped from exports). Nothing else, ever.
+9. **No `innerHTML` with unescaped user-provided data** (child name, reward
    names) — always run through `escapeHtml()` first.
 
 ## Testing
