@@ -142,3 +142,12 @@ stickers apply" to falling) but the interaction was never explicitly decided.
 Not fixed — needs Marat's call: (a) leave as-is (simplest, and arguably fine —
 a bonus is a bonus), (b) give falling its own separate daily-perfect slot, or
 (c) exclude falling-only days from the streak. Left for a future session.
+
+## Falling numbers — residual verification (WP-F3, 2026-08-27)
+The `resize_window` browser automation tool did not reliably shrink the
+viewport below ~500×723 in this environment, so the F3-2 done-when's precise
+multi-viewport screenshot matrix (320×568, 375×667, 568×320, 820×1180) is only
+partially verified — 6-lane bubble fit was confirmed comfortably at ~500px
+width, but the smallest-width and landscape cases are not yet pixel-checked.
+WP-F5 (live verification) should re-attempt with device emulation or a real
+device if this tool limitation persists.

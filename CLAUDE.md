@@ -10,13 +10,15 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
   `window.MathCore` in the browser). Sections, in order:
   `CONFIG` (every tunable number), `Facts`, `Economy`, `Map` (journey map by
   tables — `docs/MAP-DESIGN.md`), `Selector` (weakness score + focus bonus for the
-  current station's table),
+  current station's table), `Falling` (distractor generation for the falling-numbers
+  game mode — `docs/FALLING-DESIGN.md`),
   `SessionCore`, `Storage` (IndexedDB + localStorage mirror, transactional
   rev-check CAS writes), `Pin` (WebCrypto hashing), `Stats`, `Migrate`.
 - `index.html` — the whole app UI: inline CSS + one `<script>` IIFE. `T`
   (every user-visible string), hash-based router (`Screens` map,
   `#screen=name`), boot sequence, screen render functions (home, question,
-  summary, map, collection, rewards, parent-setup, parent PIN/dashboard).
+  `renderFallingQuestion` (falling-numbers game mode), summary, map,
+  collection, rewards, parent-setup, parent PIN/dashboard).
 - `sw.js` — service worker: `VERSION` const, cache-first same-origin,
   network-passthrough cross-origin (fonts), update-toast messaging.
 - `manifest.webmanifest`, `icon-180.png`, `icon-512.png` — PWA metadata/icons

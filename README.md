@@ -4,6 +4,10 @@
 
 🔗 **המשחק חי כאן:** https://marvol26.github.io/math-tables/
 
+## מספרים נופלים 🎈 (מצב משחק נוסף)
+
+מצב אופציונלי: במקום להקליד, מספר תרגיל מוצג למעלה ותשובות אפשריות "נופלות" מלמעלה בבועות — לוחצים על התשובה הנכונה (או מקישים 1–4/5/6 במחשב). תשובה נכונה לפני שהבועה נוחתת = מטבעות כפולים; אם הבועות נוחתות לפני שבוחרים, אפשר עדיין ללחוץ בנחת ולקבל מטבעות רגילים — אף תשובה לא נספרת כטעות. תשובה לא נכונה מציגה את אותו ציור-נקודות שמסביר את התרגיל, והוא נשאל שוב בסוף הסבב. המצב כבוי כברירת מחדל; ההורים מפעילים אותו במסך ההורים ← הגדרות (מתג הפעלה, זמן נפילה 3–20 שניות, ומספר בועות 4–6). מטבעות ומדבקות כן נספרים; **המצב הזה לא משפיע על "נלמד לגמרי", על מפת המסע, ועל התרגילים שחוזרים בין סבבים** — הוא אימון זיהוי, לא תרגול שינון.
+
 ## התקנה על iPad / iPhone
 
 1. פתחו את הכתובת של המשחק ב**Safari** (לא בדפדפן אחר — רק Safari תומך בהוספה למסך הבית באייפד/אייפון).
@@ -55,6 +59,10 @@ python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפ
 A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
 
 🔗 **Live at:** https://marvol26.github.io/math-tables/
+
+## Falling numbers 🎈 (a second game mode)
+
+An optional mode: instead of typing, the expression is shown at the top and candidate answers fall from the top in bubbles — tap the correct one (or press keys 1–4/5/6 on a computer). A correct answer before the bubble lands doubles the coins; if the bubbles land first you can still tap calmly for regular coins — landing is never counted as a miss. A wrong tap shows the same dot-picture explanation as typed mode and the fact is re-asked at the end of that session. Off by default; parents enable it from the parent view → settings (an enable switch, fall time 3–20 seconds, and 4–6 bubbles). Coins and stickers still count; **this mode never affects "mastered", the journey map, or which facts carry over between sessions** — it trains recognition, not recall.
 
 ## Install on iPad / iPhone
 
