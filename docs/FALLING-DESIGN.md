@@ -8,7 +8,7 @@ An optional second way to play. An expression (e.g. `7 × 8`) is shown at the to
 ## 2. Decisions (designer; Marat may flip any)
 | # | Decision |
 |---|---|
-| F1 | Entry: Home gets a second button "מספרים נופלים 🎈" when the parent enables the mode (`settings.falling.enabled`, default **off**). |
+| F1 | Entry: Home gets a second button "מספרים נופלים 🎈" when the parent enables the mode (`settings.falling.enabled`, default **off**). Amended 2026-08-28: the button is shown even while a typed session is suspended — that session is *parked* (`state.parked`) and returns after the balloon round; a parked falling session stays resumable even if the parent later disables the mode, but no new one starts. |
 | F2 | Parent settings: `falling.durationSec` 3–20 (default 8) = time for a number to reach the bottom; `falling.options` 4–6 (default 4). |
 | F3 | A falling session = 10 facts from the same `Selector.plan` (carryover/focus/review as usual) so it feels consistent. |
 | F4 | **Coins yes, learning stats no**: a correct tap pays the fact's base value (×2 if tapped before the numbers land; retries 0), streak/perfect/near-perfect bonuses and sticker unlocks apply; **facts/mastery/map/carryover are NOT updated** (recognition ≠ recall — see research note 2026-08-27). The session record is stored with `mode: "falling"` and shown in the parent history with a 🎈. |

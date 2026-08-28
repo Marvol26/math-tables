@@ -702,6 +702,10 @@
         SessionCore.refreshSettings(state);
         return state.active;
       }
+      // A NEW falling session only when the parent has the mode enabled; a parked
+      // one stays resumable above so it can always be finished (review 2026-08-28 #1).
+      if (mode === "falling" && !(state.settings.falling && state.settings.falling.enabled)) mode = "typed";
+      if (state.active && (state.active.mode || "typed") === mode) { SessionCore.refreshSettings(state); return state.active; }
       if (state.active) SessionCore.park(state);
       return SessionCore.start(state, rng, now, { mode: mode });
     },
@@ -985,7 +989,7 @@
 
       state.carryover = nextCarryover;
       state.active = null;
-      if (state.parked) { state.active = state.parked; state.parked = null; if (state.active.current) state.active.current.interrupted = true; } // the parked session returns
+      SessionCore.unpark(state); // the parked session (if any) returns
 
       return session;
     },
@@ -1365,26 +1369,22 @@
         if (!Array.isArray(val.retryQueue)) problems.push(name + ".retryQueue must be an array");
         if (!Array.isArray(val.attempts)) problems.push(name + ".attempts must be an array");
       });
-      if (raw.active !== undefined && raw.active !== null) {
-        if (typeof raw.active !== "object" || Array.isArray(raw.active)) {
-          /* reported above */
-        } else {
-          var a = raw.active;
-          if (!Array.isArray(a.planned)) problems.push("active.planned must be an array");
-          if (!Array.isArray(a.queue)) problems.push("active.queue must be an array");
-          if (!Array.isArray(a.retryQueue)) problems.push("active.retryQueue must be an array");
-          if (!Array.isArray(a.attempts)) problems.push("active.attempts must be an array");
-          if (typeof a.id !== "string" || !a.id) problems.push("active.id must be a non-empty string");
-          if (a.current !== undefined && a.current !== null) {
-            var c = a.current;
-            if (typeof c !== "object" || Array.isArray(c)) problems.push("active.current must be an object or null");
-            else {
-              if (typeof c.asked !== "string" || !/^\d+x\d+$/.test(c.asked)) problems.push("active.current.asked must be like \"7x2\"");
-              if (typeof c.key !== "string" || !/^\d+x\d+$/.test(c.key)) problems.push("active.current.key must be like \"2x7\"");
-              if (typeof c.shownAt !== "number") problems.push("active.current.shownAt must be a number");
-            }
+      [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
+        var name = pair[0], a = pair[1];
+        if (!a || typeof a !== "object" || Array.isArray(a)) return;
+        if (typeof a.id !== "string" || !a.id) problems.push(name + ".id must be a non-empty string");
+        if (a.current !== undefined && a.current !== null) {
+          var c = a.current;
+          if (typeof c !== "object" || Array.isArray(c)) problems.push(name + ".current must be an object or null");
+          else {
+            if (typeof c.asked !== "string" || !/^\d+x\d+$/.test(c.asked)) problems.push(name + ".current.asked must be like \"7x2\"");
+            if (typeof c.key !== "string" || !/^\d+x\d+$/.test(c.key)) problems.push(name + ".current.key must be like \"2x7\"");
+            if (typeof c.shownAt !== "number") problems.push(name + ".current.shownAt must be a number");
           }
         }
+      });
+      if (raw.active && raw.parked && typeof raw.active === "object" && typeof raw.parked === "object" && (raw.active.mode || "typed") === (raw.parked.mode || "typed")) {
+        problems.push("active and parked must be different modes");
       }
       return { ok: problems.length === 0, problems: problems };
     },

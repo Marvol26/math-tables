@@ -1004,12 +1004,12 @@
   function switchMode(mode) {
     save(function (s) { MathCore.SessionCore.switchTo(s, mode, Math.random, Date.now()); }).then(function (result) {
       if (result.ok) { navigate("question"); }
-    });
+    }).catch(function (err) { showSaveFailureBanner(String((err && err.message) || err)); }); // e.g. PARKED_EXISTS from a hand-edited backup — never a silently dead button
   }
 
-  // Falling mode entry (docs/FALLING-DESIGN.md F1) — only reachable when no
-  // session is already active; Home hides this button otherwise (one session
-  // at a time).
+  // Falling mode entry (docs/FALLING-DESIGN.md F1). Since 2026-08-28 a suspended
+  // session of the other mode is parked (state.parked) and returns when this
+  // one ends, so the balloon game is always reachable.
   function startFallingSession() { switchMode("falling"); }
 
   function bindAction(action, handler) {
@@ -2214,7 +2214,7 @@
 
     var historyRows = state.sessions.slice(-20).reverse();
     var historyHtml =
-      (state.active ? '<div class="reward-item"><span>' + T.parent.historyOpen + "</span><span>—</span></div>" : "") +
+      ((state.active || state.parked) ? '<div class="reward-item"><span>' + T.parent.historyOpen + "</span><span>—</span></div>" : "") +
       (historyRows.length
         ? historyRows
             .map(function (sess) {
@@ -2425,7 +2425,7 @@
         ? raw.economy.ledger.reduce(function (sum, e) { return e.type === "earn" ? sum + e.amount : sum; }, 0)
         : 0;
     var exportDate = raw.lastExportAt ? new Date(raw.lastExportAt).toLocaleDateString("he-IL") : "—";
-    var warning = S().active ? '<p class="muted">' + T.parent.importWarningActive + "</p>" : "";
+    var warning = (S().active || S().parked) ? '<p class="muted">' + T.parent.importWarningActive + "</p>" : "";
     var area = document.getElementById("import-preview-area");
     area.innerHTML =
       '<div class="card">' +
