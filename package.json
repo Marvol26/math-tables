@@ -4,7 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node --test 'tests/**/*.test.js'"
+    "test": "node --check app.js && node --check strings.js && node --check sw.js && node --test 'tests/**/*.test.js'"
   },
   "devDependencies": {
     "fake-indexeddb": "6.0.0"

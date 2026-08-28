@@ -14,11 +14,24 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
   game mode — `docs/FALLING-DESIGN.md`),
   `SessionCore`, `Storage` (IndexedDB + localStorage mirror, transactional
   rev-check CAS writes), `Pin` (WebCrypto hashing), `Stats`, `Migrate`.
-- `index.html` — the whole app UI: inline CSS + one `<script>` IIFE. `T`
-  (every user-visible string), hash-based router (`Screens` map,
-  `#screen=name`), boot sequence, screen render functions (home, question,
-  `renderFallingQuestion` (falling-numbers game mode), summary, map,
-  collection, rewards, parent-setup, parent PIN/dashboard).
+- `index.html` — the document shell only (≈30 lines): head/meta, the
+  `<link rel="stylesheet" href="styles.css?v=…">`, the app's static markup,
+  and the three classic `<script>` tags in load order
+  `core.js, strings.js, app.js` (no `async`/`defer`). No CSS, no logic, no
+  strings live here directly.
+- `styles.css` — the app's CSS, moved verbatim out of `index.html`'s old
+  `<style>` block (mechanical split, no rule changed). Inline `style=""`
+  attributes on individual elements still live in `index.html`/`app.js`
+  markup, not here.
+- `strings.js` — `window.MathText = { T, escapeHtml, tableTag, bdi }`. `T`
+  (every user-visible string) plus the three small helpers it depends on
+  (`escapeHtml`, `tableTag`, `bdi`), moved verbatim out of the old inline
+  script. `T` itself only ever calls `bdi`/`tableTag`, never `escapeHtml`.
+- `app.js` — the rest of the old inline IIFE, verbatim, reading
+  `window.MathText` for `T`/`escapeHtml`/`tableTag`/`bdi`: hash-based router
+  (`Screens` map, `#screen=name`), boot sequence, screen render functions
+  (home, question, `renderFallingQuestion` (falling-numbers game mode),
+  summary, map, collection, rewards, parent-setup, parent PIN/dashboard).
 - `sw.js` — service worker: generated `APP_VERSION`/`RELEASE`/`HASHED_ASSETS` lines
   (written by `tools/bump-version.js`, never by hand), install-time self-consistency gate, cache-first same-origin,
   network-passthrough cross-origin (fonts), update-toast messaging.
@@ -33,7 +46,7 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
 
 1. **No build step, no runtime dependencies.** `fake-indexeddb` is dev-only,
    test-only, pinned, installed with `--ignore-scripts`.
-2. **Every user-visible string lives in `T`** (`index.html`) — none inline in
+2. **Every user-visible string lives in `T`** (`strings.js`) — none inline in
    HTML-building code.
 3. **Every economy/threshold number lives in `CONFIG`** (`core.js`) — no
    magic numbers for coin values, time limits, mastery thresholds, etc.
@@ -75,12 +88,11 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
 
 ## Testing
 
-`npm test` runs the full suite. Any change to `core.js` should keep it green
-before committing; any change to `index.html`'s inline script should pass
-`node --check` on the extracted script (see `math-build-status.md` entries
-for the exact extraction one-liner) — that only catches syntax errors, not
-logic bugs, so live-browser testing (`claude-in-chrome` skill, or manually)
-is the real verification for UI changes.
+`npm test` runs `node --check` on `app.js`, `strings.js`, `sw.js`, then the
+full `node --test` suite. Any change to `core.js`/`app.js`/`strings.js`
+should keep it green before committing — `node --check` only catches syntax
+errors, not logic bugs, so live-browser testing (`claude-in-chrome` skill,
+or manually) is the real verification for UI changes.
 
 ## Not in scope (see DESIGN §11 / NEXT-ACTIONS.md)
 
