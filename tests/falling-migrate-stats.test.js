@@ -74,10 +74,12 @@ test("validateImport rejects settings.falling with an out-of-range durationSec/o
   assert.equal(Migrate.validateImport({ settings: { falling: "nope" } }).ok, false);
 });
 
-// Fixture: one typed session, one falling session with identical shape except
-// mode/coins, proving the falling session moves coins AND masteredCount but
-// not accuracy/avgMs (balloon mastery now counts, Marat 2026-08-28).
-test("Stats.trends: a falling session moves coins and masteredCount but not accuracy/avgMs", () => {
+// V2-DESIGN §2 B1 (revised 2026-08-28): accuracy/avgMs are now per-mode
+// series aligned to ONE common window of the last n sessions (all modes),
+// with null at every position that isn't that mode — not a typed-only
+// filtered/shrunk axis. Fixture: one typed session, one falling session with
+// identical shape except mode/coins.
+test("Stats.trends: per-mode accuracy/avgMs series are null-aligned to the common window; coins/masteredCount stay all-mode", () => {
   const typedSession = {
     id: "t1",
     mode: "typed",
@@ -99,19 +101,23 @@ test("Stats.trends: a falling session moves coins and masteredCount but not accu
   const state = { sessions: [typedSession, fallingSession] };
   const trends = Stats.trends(state, 30);
 
-  assert.deepEqual(trends.accuracy, [0.5]); // only the typed session
+  assert.deepEqual(trends.accuracy.typed, [0.5, null]);
+  assert.deepEqual(trends.accuracy.falling, [null, 1]);
+  assert.deepEqual(trends.accuracy.tetris, [null, null]);
+  assert.deepEqual(trends.avgMs.typed, [1500, null]);
+  assert.deepEqual(trends.avgMs.falling, [null, 500]);
   assert.deepEqual(trends.masteredCount, [5, 7]); // both sessions — mastery/map move for falling too
-  assert.equal(trends.avgMs.length, 1);
-  assert.equal(trends.coins.length, 2); // both sessions
   assert.deepEqual(trends.coins, [3, 99]);
+  assert.deepEqual(trends.modes, ["typed", "falling"]);
 });
 
-// WP-F1 gate review (fresh Fable 5, MEDIUM): filtering falling sessions AFTER
-// windowing to the last n lets a run of falling sessions push real typed
-// history out of the accuracy/avgMs/masteredCount trend window entirely,
-// even though the app default (window 30) makes this the expected shape for
-// a child who prefers the balloon game. Filter before windowing instead.
-test("Stats.trends: a long run of falling sessions does not starve the learning-trend window", () => {
+// WP-F1's original concern (a run of falling sessions starving the typed
+// line) is now addressed differently: instead of filtering typed sessions
+// into their own pre-windowed axis, the typed line simply shows gaps (null)
+// at every falling-session position across the ONE shared window — design
+// §2 B1's own test list: "a run of 30 falling sessions leaves the typed
+// line with gaps, not blanks."
+test("Stats.trends: a run of falling sessions leaves the typed line with gaps, not blanks", () => {
   const typedSession = {
     mode: "typed",
     planned: ["1x1"],
@@ -132,9 +138,15 @@ test("Stats.trends: a long run of falling sessions does not starve the learning-
   for (let i = 0; i < 30; i++) sessions.push(fallingSession);
   const state = { sessions };
 
-  const trends = Stats.trends(state, 30);
-  assert.equal(trends.accuracy.length, 1, "the one typed session must still appear in the window");
-  assert.equal(trends.avgMs.length, 1);
-  assert.equal(trends.coins.length, 30); // coins keeps the raw window (all-falling here)
-  assert.equal(trends.masteredCount.length, trends.coins.length, "masteredCount now windows over ALL sessions, like coins");
+  // Window large enough to hold every session (31), so the typed session
+  // is not simply dropped by the window itself — its gap is real, not a
+  // side effect of windowing.
+  const trends = Stats.trends(state, 31);
+  assert.equal(trends.accuracy.typed.length, 31);
+  assert.equal(trends.accuracy.typed[0], 1, "the one typed session's own accuracy value survives"); // 1/1 = 1
+  assert.ok(trends.accuracy.typed.slice(1).every((v) => v === null), "every falling-session position is null, not dropped");
+  assert.ok(trends.accuracy.falling.slice(1).every((v) => v === 1), "the falling line carries every falling session's own value");
+  assert.equal(trends.accuracy.falling[0], null);
+  assert.equal(trends.coins.length, 31); // coins/masteredCount stay all-mode, unaffected
+  assert.equal(trends.masteredCount.length, 31);
 });

@@ -17,7 +17,7 @@ test("key() is commutative", () => {
   assert.equal(Facts.key(7, 3), "3x7");
 });
 
-test("mastery requires 3 correct first attempts with median <= 6000ms and none interrupted", () => {
+test("mastery requires 3 correct first attempts with median <= 8000ms (CONFIG.MASTERY_MS_THRESHOLD, V2-DESIGN B2b) and none interrupted", () => {
   const state = emptyState();
   const key = "6x7";
   const good = { ok: true, ms: 4000, asked: "6x7", t: 1, withinLimit: true, interrupted: false, retry: false };
@@ -33,8 +33,8 @@ test("mastery is not reached if the median of the last 3 exceeds the threshold",
   const state = emptyState();
   const key = "6x7";
   Facts.updateFromAttempt(state, key, { ok: true, ms: 4000, asked: "6x7", t: 1, withinLimit: true, interrupted: false, retry: false });
-  Facts.updateFromAttempt(state, key, { ok: true, ms: 7000, asked: "6x7", t: 2, withinLimit: false, interrupted: false, retry: false });
-  Facts.updateFromAttempt(state, key, { ok: true, ms: 8000, asked: "6x7", t: 3, withinLimit: false, interrupted: false, retry: false });
+  Facts.updateFromAttempt(state, key, { ok: true, ms: 9000, asked: "6x7", t: 2, withinLimit: false, interrupted: false, retry: false });
+  Facts.updateFromAttempt(state, key, { ok: true, ms: 10000, asked: "6x7", t: 3, withinLimit: false, interrupted: false, retry: false });
   assert.equal(Facts.mastery(state.facts[key]), "learning");
 });
 

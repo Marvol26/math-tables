@@ -183,3 +183,6 @@ State: everything pushed — live 0.9.2 / sw v12 (commit d345112). Tests 144/144
 - Desktop export fallback marks lastExportAt even on old iOS (<15) preview path.
 - Every save writes localStorage twice (mirror + lastgood) — fine under quota, noted.
 - findGist first page only (100 gists); one account = one child.
+
+## Evidence rebuild residual (2026-08-28, review LOW)
+If a whole later session's `endedAt` is stepped back within `EVIDENCE_CLOCK_SKEW_MS`, the earlier session's rebuilt `masteredAfter` includes the later session's attempts (trend value off by one point; no station lost). Inherent to time-ordered replay; not fixable without trusting stored order, which would re-break the parked interleave.

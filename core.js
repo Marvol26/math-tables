@@ -43,7 +43,11 @@
 
     // Mastery / KPIs
     MASTERY_WINDOW: 3,
-    MASTERY_MS_THRESHOLD: 6000,
+    // 6000 -> 8000 (V2-DESIGN B2b, 2026-08-28): Marat's daughter's typed
+    // average is 10.7s including thinking on hard facts; a 2-digit numpad
+    // answer costs ~3s mechanically; the balloon fall is 8s. 6s made mastery
+    // unreachable for a normal 8-year-old typist.
+    MASTERY_MS_THRESHOLD: 8000,
     SPEED_CLAMP_MS: 30000,
     RECENT_WINDOW: 20,
 
@@ -65,7 +69,16 @@
 
     // Storage / retention
     ATTEMPTS_RETENTION_SESSIONS: 200,
-    SCHEMA_VERSION: 1,
+    SCHEMA_VERSION: 2,
+
+    // Evidence rebuild (V2-DESIGN §2 B2a; closing-review 0-R MEDIUM-3, 2026-08-28):
+    // tolerance for a device clock stepping mid-question (observed on iOS) —
+    // an attempt's `t` is accepted up to this far outside its session's
+    // [startedAt, endedAt] (or a journal's startedAt) before the evidence
+    // preflight calls it malformed. 5 minutes is generous next to an 8-20s
+    // question and comfortably rejects a stale/foreign multi-hour or
+    // multi-day skew.
+    EVIDENCE_CLOCK_SKEW_MS: 5 * 60 * 1000,
 
     // UI timing (shared so no number lives outside CONFIG — I7)
     WRONG_ANSWER_DISPLAY_MS: 1800,
@@ -87,6 +100,10 @@
       MIN_OPTIONS: 4,
       MAX_OPTIONS: 6,
       FILL_WINDOW: 20,
+      // V2-DESIGN B3 (2026-08-28): a beat before the balloons start falling so
+      // the exercise is readable first. The ×2 window still counts from
+      // shownAt — 0.6s is negligible against an 8s fall.
+      START_DELAY_MS: 600,
     },
   };
 
@@ -1087,28 +1104,36 @@
       };
     },
 
+    // V2-DESIGN §2 B1 (revised 2026-08-28, supersedes the WP-F1 typed-only
+    // filter): a 4-option balloon tap has a 25% guess floor and tap time !=
+    // recall time, so accuracy/avgMs still separate typed from falling — but
+    // instead of filtering falling sessions out of the x-axis entirely
+    // (which is what made Marat's parent charts look "frozen"), every mode
+    // gets its OWN series over the SAME common window of the last n sessions
+    // (all modes), with null at every position that isn't that mode. A run
+    // of falling sessions now shows as gaps in the typed line, not a
+    // shrunk/blank chart.
     trends: function (state, n) {
       var sessions = state.sessions.slice(-n);
-      // Falling now moves mastery/map like typed answers (Marat 2026-08-28),
-      // so masteredCount is windowed from ALL sessions (`sessions`, not
-      // `learningSessions`). accuracy/avgMs STAY typed-only: a 4-option tap
-      // has a 25% guess floor and tap time != recall time, so those two stay
-      // filtered to typed sessions. Filter BEFORE windowing (not after) — a
-      // run of falling sessions must not push typed history out of the
-      // accuracy/avgMs window (WP-F1 gate review, MEDIUM: a child who
-      // prefers falling would otherwise see blank accuracy/speed charts once
-      // 30 falling sessions in a row outrun the window, even though real
-      // typed history exists).
-      var learningSessions = state.sessions
-        .filter(function (s) { return (s.mode || "typed") !== "falling"; })
-        .slice(-n);
+      var modeKeys = ["typed", "falling", "tetris"];
+      var accuracy = { typed: [], falling: [], tetris: [] };
+      var avgMs = { typed: [], falling: [], tetris: [] };
+      var modes = sessions.map(function (s) { return s.mode || "typed"; });
+      sessions.forEach(function (s) {
+        var mode = s.mode || "typed";
+        var acc = s.planned.length ? s.firstTryCorrect / s.planned.length : 0;
+        var avg = Stats.sessionAvgMs(s);
+        modeKeys.forEach(function (m) {
+          accuracy[m].push(m === mode ? acc : null);
+          avgMs[m].push(m === mode ? avg : null);
+        });
+      });
       return {
-        accuracy: learningSessions.map(function (s) {
-          return s.planned.length ? s.firstTryCorrect / s.planned.length : 0;
-        }),
-        avgMs: learningSessions.map(Stats.sessionAvgMs),
+        accuracy: accuracy,
+        avgMs: avgMs,
         masteredCount: sessions.map(function (s) { return s.masteredAfter; }),
         coins: sessions.map(function (s) { return s.coinsEarned; }),
+        modes: modes,
       };
     },
 
@@ -1173,6 +1198,142 @@
   };
 
   // --------------------------------------------------------------------
+  // Evidence rebuild helpers (V2-DESIGN §2 B2a). Pure; used by both
+  // Migrate.preflightEvidence (strict) and Migrate.validateImport (permissive
+  // — attempts are optional there; when present, same invariants apply).
+  // --------------------------------------------------------------------
+  function canonicalizeUnlocked(list) {
+    var stickerSet = new Set(CONFIG.STICKERS);
+    var seen = new Set();
+    var result = [];
+    (Array.isArray(list) ? list : []).forEach(function (id) {
+      if (typeof id === "string" && stickerSet.has(id) && !seen.has(id)) {
+        seen.add(id);
+        result.push(id);
+      }
+    });
+    return result;
+  }
+
+  var DIRECTIONAL_RE = /^\d+x\d+$/;
+
+  // "7x2" -> "2x7" (the undirected fact key); null if malformed.
+  function canonicalOf(asked) {
+    if (typeof asked !== "string" || !DIRECTIONAL_RE.test(asked)) return null;
+    var p = Facts.parts(asked);
+    return Facts.key(p[0], p[1]);
+  }
+
+  function multisetEqual(a, b) {
+    if (a.length !== b.length) return false;
+    var counts = {};
+    a.forEach(function (x) { counts[x] = (counts[x] || 0) + 1; });
+    b.forEach(function (x) { counts[x] = (counts[x] || 0) - 1; });
+    return Object.keys(counts).every(function (k) { return counts[k] === 0; });
+  }
+
+  // Structural only (types/arrays/canonical keys) — shared by validateImport
+  // (permissive: a backup must not be rejected wholesale for something an
+  // iOS clock step could cause) and by the stricter semantic checks below
+  // (which add the clock-skew-tolerant bounds on top). `ms` may be negative
+  // (a clock stepping backward mid-question) — never a rejection reason;
+  // rebuildEvidence clamps it to 0 at replay. Only non-finite/wrong-typed
+  // values are structurally invalid.
+  function attemptStructureValid(a) {
+    if (!a || typeof a !== "object") return false;
+    var key = canonicalOf(a.asked);
+    if (key === null) return false;
+    if (typeof a.key !== "string" || a.key !== key) return false;
+    if (Facts.allKeys().indexOf(a.key) === -1) return false;
+    if (typeof a.ok !== "boolean") return false;
+    if (typeof a.ms !== "number" || !isFinite(a.ms)) return false;
+    if (typeof a.t !== "number" || !isFinite(a.t) || a.t <= 0) return false;
+    if (typeof a.retry !== "boolean") return false;
+    if (typeof a.interrupted !== "boolean") return false;
+    return true;
+  }
+
+  // Structural-only check for one session's `attempts` (closing-review 0-R
+  // MEDIUM-3): used by Migrate.validateImport, which must not reject a whole
+  // backup for a SEMANTIC evidence inconsistency (t outside session bounds,
+  // multiset/firstTryCorrect/misses disagreement) — those can legitimately
+  // arise from a device clock stepping mid-question and are the boot
+  // preflight's job (degrades to done:false, not an import rejection).
+  // Attempts are optional (absent = pass, backward-compatible with trimmed
+  // history); when present, every attempt must be well-typed and its key
+  // must belong to `planned`.
+  function sessionAttemptsStructurallyValid(session) {
+    if (!Array.isArray(session.attempts)) return true;
+    if (!Array.isArray(session.planned)) return false;
+    var plannedCanonical = session.planned.map(canonicalOf);
+    if (plannedCanonical.indexOf(null) !== -1) return false;
+    for (var i = 0; i < session.attempts.length; i++) {
+      var a = session.attempts[i];
+      if (!attemptStructureValid(a)) return false;
+      if (plannedCanonical.indexOf(a.key) === -1) return false;
+    }
+    return true;
+  }
+
+  // Strict, all-fields-required SEMANTIC check for one COMPLETED session
+  // (boot preflight only — see sessionAttemptsStructurallyValid for the
+  // permissive version validateImport uses). Returns a reason string on
+  // failure, null on success. `t` tolerates CONFIG.EVIDENCE_CLOCK_SKEW_MS
+  // outside [startedAt, endedAt] (a device clock stepping mid-question).
+  function completedSessionEvidenceProblem(session) {
+    if (!Array.isArray(session.attempts)) return "trimmed";
+    if (typeof session.startedAt !== "number" || !isFinite(session.startedAt)) return "malformed";
+    if (typeof session.endedAt !== "number" || !isFinite(session.endedAt)) return "malformed";
+    if (session.startedAt > session.endedAt) return "malformed";
+    if (!Array.isArray(session.planned)) return "malformed";
+    var plannedCanonical = session.planned.map(canonicalOf);
+    if (plannedCanonical.indexOf(null) !== -1) return "malformed";
+    var skew = CONFIG.EVIDENCE_CLOCK_SKEW_MS;
+    var nonRetryAsked = [];
+    for (var i = 0; i < session.attempts.length; i++) {
+      var a = session.attempts[i];
+      if (!attemptStructureValid(a)) return "malformed";
+      if (a.t < session.startedAt - skew || a.t > session.endedAt + skew) return "malformed";
+      if (plannedCanonical.indexOf(a.key) === -1) return "malformed";
+      if (!a.retry) nonRetryAsked.push(a);
+    }
+    if (!multisetEqual(nonRetryAsked.map(function (a) { return a.asked; }), session.planned)) return "malformed";
+    var firstTryCorrect = nonRetryAsked.filter(function (a) { return a.ok; }).length;
+    if (firstTryCorrect !== session.firstTryCorrect) return "malformed";
+    var missesComputed = [];
+    nonRetryAsked.forEach(function (a) { if (!a.ok && missesComputed.indexOf(a.key) === -1) missesComputed.push(a.key); });
+    var missesGiven = Array.isArray(session.misses) ? session.misses.slice() : [];
+    if (!multisetEqual(missesComputed.slice().sort(), missesGiven.slice().sort())) return "malformed";
+    return null;
+  }
+
+  // Strict SEMANTIC check for an active/parked journal (boot preflight
+  // only). Returns a reason string on failure, null on success. `t` tolerates
+  // CONFIG.EVIDENCE_CLOCK_SKEW_MS before `startedAt` (no upper bound — the
+  // journal is still in progress, "now" keeps moving).
+  function journalEvidenceProblem(journ) {
+    if (!journ || typeof journ !== "object") return "malformed";
+    if (typeof journ.startedAt !== "number" || !isFinite(journ.startedAt)) return "malformed";
+    if (!Array.isArray(journ.attempts)) return "malformed";
+    if (!Array.isArray(journ.queue)) return "malformed";
+    if (!Array.isArray(journ.planned)) return "malformed";
+    var plannedCanonical = journ.planned.map(canonicalOf);
+    if (plannedCanonical.indexOf(null) !== -1) return "malformed";
+    var queueCanonical = journ.queue.map(canonicalOf);
+    if (queueCanonical.indexOf(null) !== -1) return "malformed";
+    var skew = CONFIG.EVIDENCE_CLOCK_SKEW_MS;
+    var nonRetryAsked = [];
+    for (var i = 0; i < journ.attempts.length; i++) {
+      var a = journ.attempts[i];
+      if (!attemptStructureValid(a)) return "malformed";
+      if (a.t < journ.startedAt - skew) return "malformed";
+      if (!a.retry) nonRetryAsked.push(a.key);
+    }
+    if (!multisetEqual(nonRetryAsked.concat(queueCanonical).slice().sort(), plannedCanonical.slice().sort())) return "malformed";
+    return null;
+  }
+
+  // --------------------------------------------------------------------
   // Migrate — pure raw -> state normalization + import validation (DESIGN §8)
   // --------------------------------------------------------------------
   var Migrate = {
@@ -1203,6 +1364,9 @@
         active: null,
         parked: null,
         map: { reached: {} },
+        // schemaVersion 2 (V2-DESIGN B2a-4). `evidenceRebuild` is null until the
+        // one-time rebuild guard has run (see Migrate.rebuildEvidence).
+        meta: { evidenceRebuild: null },
       };
     },
 
@@ -1250,7 +1414,10 @@
         },
         economy: {
           ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],
-          unlocked: Array.isArray(re.unlocked) ? re.unlocked.slice() : [],
+          // Canonicalised (schema 2, V2-DESIGN B2a-4/§3.4): unique, ∈ CONFIG.STICKERS,
+          // order preserved; unknown ids dropped (Economy.newUnlocks recomputes
+          // any missing unlocks via Migrate.recompute, called by the caller).
+          unlocked: canonicalizeUnlocked(re.unlocked),
           rewards: Array.isArray(re.rewards) ? JSON.parse(JSON.stringify(re.rewards)) : [],
           requests: Array.isArray(re.requests) ? JSON.parse(JSON.stringify(re.requests)) : [],
         },
@@ -1266,6 +1433,9 @@
         parked: raw.parked ? JSON.parse(JSON.stringify(raw.parked)) : null, // additive 2026-08-28 (one parked session of the other mode)
         // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
         map: { reached: raw.map && raw.map.reached && typeof raw.map.reached === "object" ? JSON.parse(JSON.stringify(raw.map.reached)) : {} },
+        // Schema 1 -> 2 (V2-DESIGN B2a-4): add meta.evidenceRebuild, never
+        // silently dropped by an older client re-migrating this state object.
+        meta: { evidenceRebuild: raw.meta && raw.meta.evidenceRebuild ? JSON.parse(JSON.stringify(raw.meta.evidenceRebuild)) : null },
       };
       // Any resumed session (fresh boot or import onto another device): the
       // in-flight question is deferred to the end of its queue and re-asked
@@ -1300,6 +1470,9 @@
       }
       if (typeof raw.schemaVersion === "number" && raw.schemaVersion > CONFIG.SCHEMA_VERSION) {
         problems.push("schemaVersion " + raw.schemaVersion + " is newer than supported " + CONFIG.SCHEMA_VERSION);
+      }
+      if (raw.meta !== undefined && raw.meta !== null && (typeof raw.meta !== "object" || Array.isArray(raw.meta))) {
+        problems.push("meta must be an object");
       }
       if (raw.economy && raw.economy.ledger !== undefined) {
         if (!Array.isArray(raw.economy.ledger)) {
@@ -1366,6 +1539,19 @@
             if (typeof session.coinsEarned !== "number") problems.push("sessions[" + i + "].coinsEarned must be a number");
             if (typeof session.masteredAfter !== "number") problems.push("sessions[" + i + "].masteredAfter must be a number");
             if (session.perfectSeries !== undefined && (typeof session.perfectSeries !== "number" || session.perfectSeries < 0)) problems.push("sessions[" + i + "].perfectSeries must be a non-negative number");
+            // Evidence-rebuild STRUCTURAL check only (V2-DESIGN B2a-1; closing-review
+            // 0-R MEDIUM-3): attempts are optional (a session past the retention
+            // window has none — backward-compatible); when present, only types/
+            // arrays/canonical-key membership are checked here. The deeper SEMANTIC
+            // invariants (t within session bounds, multiset/firstTryCorrect/misses
+            // agreement) live only in the boot preflight (Migrate.preflightEvidence)
+            // — a whole backup must not be rejected for a clock-skew artifact (an
+            // iOS clock step mid-question can produce a negative ms or an out-of-
+            // bounds t on an otherwise-legitimate backup); the preflight degrades
+            // to done:false instead, and simply keeps deferring the rebuild.
+            if (!sessionAttemptsStructurallyValid(session)) {
+              problems.push("sessions[" + i + "].attempts has a structurally invalid attempt (bad type/canonical key)");
+            }
           });
         }
       }
@@ -1437,6 +1623,132 @@
         state.economy.unlocked = state.economy.unlocked.concat(newly);
       }
       return state;
+    },
+
+    // --------------------------------------------------------------------
+    // One-time evidence rebuild (V2-DESIGN §2 B2a). Diagnosis: balloon rounds
+    // never updated facts before 0.10.0, and MASTERY_MS_THRESHOLD (6000, now
+    // 8000) made mastery unreachable for a slow typist — so a child's
+    // lifetime coins/sessions can be far ahead of what facts/map/masteredAfter
+    // show. This replays history once, guarded by meta.evidenceRebuild.
+    // --------------------------------------------------------------------
+
+    // True unless the rebuild has already run to a terminal outcome
+    // (done:true — either successfully rebuilt or permanently "trimmed").
+    evidenceRebuildPending: function (state) {
+      return !(state.meta && state.meta.evidenceRebuild && state.meta.evidenceRebuild.done === true);
+    },
+
+    // Strict evidence-integrity check (see completedSessionEvidenceProblem /
+    // journalEvidenceProblem above for the exact invariants). Pure; does not
+    // mutate `state`. { ok:true } or { ok:false, reason: "trimmed"|"malformed" }.
+    preflightEvidence: function (state) {
+      for (var i = 0; i < state.sessions.length; i++) {
+        var reason = completedSessionEvidenceProblem(state.sessions[i]);
+        if (reason) return { ok: false, reason: reason };
+      }
+      if (state.active) {
+        var activeReason = journalEvidenceProblem(state.active);
+        if (activeReason) return { ok: false, reason: activeReason };
+      }
+      if (state.parked) {
+        var parkedReason = journalEvidenceProblem(state.parked);
+        if (parkedReason) return { ok: false, reason: parkedReason };
+      }
+      return { ok: true };
+    },
+
+    // Mutates `state` in place: on preflight failure, only records the guard
+    // (facts/sessions/map untouched) and returns { ok:false, reason }. On
+    // success, rebuilds facts from a full timeline replay (t order, ties by
+    // session order), rewrites each session's masteredAfter/stationsReached,
+    // rebuilds map.reached from scratch at completed-session boundaries only,
+    // and records the guard as done. Returns { ok:true, stats }.
+    rebuildEvidence: function (state, now) {
+      var check = Migrate.preflightEvidence(state);
+      if (!check.ok) {
+        state.meta = state.meta || {};
+        state.meta.evidenceRebuild = { done: check.reason === "trimmed", at: now, reason: check.reason };
+        return { ok: false, reason: check.reason };
+      }
+
+      var timeline = [];
+      state.sessions.forEach(function (session, sIdx) {
+        (session.attempts || []).filter(function (a) { return !a.retry; }).forEach(function (a) {
+          // k = replay key: a session's own attempts are always replayed by its own
+          // boundary even if a backward clock step put their `t` past endedAt
+          // (review 2026-08-28 fix-verify NEW-ISSUE-A); journals keep `t`.
+          timeline.push({ a: a, sIdx: sIdx, k: Math.min(a.t, session.endedAt) });
+        });
+      });
+      var journals = [];
+      if (state.active) journals.push(state.active);
+      if (state.parked) journals.push(state.parked);
+      journals.forEach(function (journ) {
+        (journ.attempts || []).filter(function (a) { return !a.retry; }).forEach(function (a) {
+          timeline.push({ a: a, sIdx: Infinity, k: a.t });
+        });
+      });
+      timeline.sort(function (x, y) {
+        if (x.k !== y.k) return x.k - y.k;
+        return x.sIdx - y.sIdx;
+      });
+
+      state.facts = {};
+      if (!state.map) state.map = { reached: {} };
+      state.map.reached = {};
+
+      var stats = { sessionsRebuilt: 0, attemptsReplayed: 0 };
+      var cursor = 0;
+      function replay(entry) {
+        Facts.updateFromAttempt(state, entry.a.key, {
+          ok: entry.a.ok,
+          // A device clock stepping backward mid-question can produce a
+          // negative ms (closing-review 0-R MEDIUM-3) — preflight tolerates
+          // it structurally; replay clamps it so it never poisons a median.
+          ms: Math.max(0, entry.a.ms),
+          asked: entry.a.asked,
+          t: entry.a.t,
+          withinLimit: !!entry.a.withinLimit,
+          interrupted: !!entry.a.interrupted,
+          retry: false,
+        });
+        stats.attemptsReplayed++;
+      }
+
+      // Boundary gate by `t` (closing-review 0-R HIGH-1), NOT by session
+      // index: a parked/active journal (sIdx===Infinity, always sorted last
+      // on ties) or a session that FINISHED later but whose attempts carry
+      // an earlier `t` than the previous session's `endedAt` must not stall
+      // the cursor — that froze facts and silently dropped stations a child
+      // legitimately reached (reproduced: falling started, 4 submits parked,
+      // two typed sessions finished and rebuilt — map.reached came back {}
+      // instead of the real station). Replay every timeline entry whose `t`
+      // is at or before THIS session's endedAt before snapshotting it.
+      for (var si = 0; si < state.sessions.length; si++) {
+        while (cursor < timeline.length && timeline[cursor].k <= state.sessions[si].endedAt) {
+          replay(timeline[cursor]);
+          cursor++;
+        }
+        var session = state.sessions[si];
+        session.masteredAfter = Facts.allKeys().filter(function (k) {
+          return Facts.mastery(Facts.getFact(state, k)) === "mastered";
+        }).length;
+        var newlyReached = Map.newlyReached(state);
+        newlyReached.forEach(function (n) { state.map.reached[n] = session.endedAt; });
+        session.stationsReached = newlyReached;
+        stats.sessionsRebuilt++;
+      }
+      // Active/parked attempts feed facts (so the live view — weakest/heatmap/
+      // selector — is correct) but never reach a station: no boundary above.
+      while (cursor < timeline.length) {
+        replay(timeline[cursor]);
+        cursor++;
+      }
+
+      state.meta = state.meta || {};
+      state.meta.evidenceRebuild = { done: true, at: now, reason: "rebuilt" };
+      return { ok: true, stats: stats };
     },
   };
 

@@ -65,13 +65,16 @@ test("sessionAvgMs excludes retries and interrupted attempts, and clamps at 30s"
   assert.equal(avg, 16000);
 });
 
-test("trends() returns parallel arrays for the last n sessions", () => {
+test("trends() returns parallel arrays for the last n sessions; per-mode accuracy/avgMs, all-mode coins/masteredCount", () => {
   const state = fixtureState();
   const trends = Stats.trends(state, 30);
-  assert.equal(trends.accuracy.length, 1);
-  assert.equal(trends.accuracy[0], 0.9);
+  assert.equal(trends.accuracy.typed.length, 1);
+  assert.equal(trends.accuracy.typed[0], 0.9);
+  assert.deepEqual(trends.accuracy.falling, [null]);
+  assert.deepEqual(trends.accuracy.tetris, [null]);
   assert.equal(trends.coins[0], 20);
   assert.equal(trends.masteredCount[0], 1);
+  assert.deepEqual(trends.modes, ["typed"]);
 });
 
 test("heatmap: mirrored cells (a,b) and (b,a) are identical", () => {
