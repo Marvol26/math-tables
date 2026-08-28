@@ -37,3 +37,5 @@ assumptions discovered: none.
 ## 2026-08-28T19:23:42Z · designer · S1-R fix-verification round 1: MEDIUM-1 FIXED; MEDIUM-2 STILL-BROKEN (gate checked index.html but the PWA launches from "./", a separate edge-cached URL; two-read TOCTOU) → gate-and-put for both entry URLs using the checked Response, res.ok check; misplaced rule-7 clause moved from rule 9 to rule 7. node --check sw.js ok, suite 155/155. Second fix-verification requested.
 
 ## 2026-08-28T19:25:01Z · designer · S1-R fix-verification round 2: SHIP (MEDIUM-2 FIXED; LOW partial-cache-on-failed-install applied by the designer: puts deferred until both entries validate; node --check + 155/155). Reviewer note for the record: the gate is structurally tested only; a live edge-skew proof = DevTools override serving index.html with a bogus ?v= → new SW must fail to install (Marat, optional).
+
+## 2026-08-28T19:25:03Z · designer · S1 committed+pushed as 2eaf278 · package 0 baseline: 2eaf278
