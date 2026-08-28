@@ -163,3 +163,5 @@ deviations: README.md's file lists were checked but not edited — it contains n
 assumptions discovered: none new.
 
 ## 2026-08-28T21:01:38Z · designer · S2-R review (fresh Fable 5): SHIP — nothing real found (equivalence proved by diff + vm evaluation of all 28 T functions; headless boot to Home and a question screen with zero exceptions; deploy contract covers all four assets). Notes only: app.js line 9 TypeErrors if strings.js 404s (same class as core.js today); .claude/ stays untracked.
+
+## 2026-08-28T21:01:40Z · designer · S2 committed+pushed as dd660ca · package S3 baseline = the commit containing this entry (given verbatim in the kickoff prompt)
