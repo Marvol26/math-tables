@@ -52,13 +52,16 @@ test("switchTo swaps between an active and a parked session of the other mode; s
   assert.equal(state.active.id, fallingId);
 });
 
-test("a parked session's in-flight question resumes as interrupted; migrate/validateImport handle parked", () => {
+test("a parked session's in-flight question is deferred on swap; migrate/validateImport handle parked", () => {
   const state = fresh();
   SessionCore.start(state, rng, 1000);
   SessionCore.paint(state, 1100);
+  const asked = state.active.current.asked;
   SessionCore.switchTo(state, "falling", rng, 2000);
+  assert.equal(state.parked.current, null, "parking defers the in-flight question");
+  assert.equal(state.parked.queue[state.parked.queue.length - 1], asked);
   SessionCore.switchTo(state, "typed", rng, 3000);
-  assert.equal(state.active.current.interrupted, true);
+  assert.equal(state.active.current, null);
   const raw = JSON.parse(JSON.stringify(state));
   assert.equal(Migrate.validateImport(raw).ok, true);
   assert.equal(Migrate.migrate(raw).parked.mode, "falling");

@@ -673,6 +673,7 @@
     park: function (state) {
       if (!state.active) return null;
       if (state.parked) throw Object.assign(new Error("parking slot occupied"), { code: "PARKED_EXISTS" });
+      SessionCore.deferCurrent(state); // a parked session holds no in-flight question
       state.parked = state.active;
       state.active = null;
       return state.parked;
@@ -682,7 +683,7 @@
       if (state.active || !state.parked) return null;
       state.active = state.parked;
       state.parked = null;
-      if (state.active.current) state.active.current.interrupted = true; // time passed away from it
+      SessionCore.deferCurrent(state); // the question it was on comes back later with a fresh clock
       return state.active;
     },
 
@@ -698,7 +699,7 @@
         var outgoing = state.active;
         state.active = state.parked;
         state.parked = outgoing;
-        if (state.active.current) state.active.current.interrupted = true;
+        SessionCore.deferCurrent(state);
         SessionCore.refreshSettings(state);
         return state.active;
       }
@@ -733,16 +734,28 @@
       return active;
     },
 
-    // Paints the next question. If a question is already displayed (current
-    // set, unanswered) this call represents a resume after a relaunch/lifecycle
-    // interruption: mark it interrupted, keep the original shownAt (no restart).
+    // A resumed session never continues the question that was on screen when it
+    // was suspended: that question is moved to the END of its queue (unanswered,
+    // no penalty) and a fresh question is painted with a live clock. Keeps the
+    // anti-restart intent (closing the app never restarts the clock on the same
+    // question) while every resume starts with a working timer (Marat, 2026-08-28).
+    deferCurrent: function (state) {
+      var active = state.active;
+      if (!active || !active.current) return null;
+      var c = active.current;
+      var q = c.retry ? active.retryQueue : active.queue;
+      var idx = q.indexOf(c.asked);
+      if (idx !== -1) { q.splice(idx, 1); q.push(c.asked); }
+      active.current = null;
+      return c.asked;
+    },
+
+    // Paints the next question. A `current` left over from a suspended session
+    // (relaunch, parked, import) is deferred first — see deferCurrent.
     paint: function (state, now) {
       var active = state.active;
       if (!active) throw new Error("no active session");
-      if (active.current) {
-        active.current.interrupted = true;
-        return active.current;
-      }
+      if (active.current) SessionCore.deferCurrent(state);
       var fromRetry = active.queue.length === 0 && active.retryQueue.length > 0;
       var asked = fromRetry ? active.retryQueue[0] : active.queue[0];
       if (!asked) return null; // nothing left to paint; caller should finish()
@@ -1231,10 +1244,11 @@
         // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
         map: { reached: raw.map && raw.map.reached && typeof raw.map.reached === "object" ? JSON.parse(JSON.stringify(raw.map.reached)) : {} },
       };
-      // Any resumed session (fresh boot or import onto another device) counts
-      // as a lifecycle interruption (DESIGN §6/§7, R2 #5, R3 #2).
+      // Any resumed session (fresh boot or import onto another device): the
+      // in-flight question is deferred to the end of its queue and re-asked
+      // fresh later (DESIGN §6, amended 2026-08-28; replaces the "interrupted" rule).
       if (state.active && state.active.current) {
-        state.active.current.interrupted = true;
+        SessionCore.deferCurrent({ active: state.active });
       }
       if (state.active) {
         state.active.mode = state.active.mode === "falling" ? "falling" : "typed";

@@ -290,7 +290,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.9.1"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.9.2"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -685,7 +685,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.9.1"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.9.2"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -1051,21 +1051,10 @@
   function paintNextQuestion() {
     var state = S();
     if (!state.active) { navigate("home"); return; }
-    if (state.active.current) {
-      // Reaching the question screen with a current question ALREADY set
-      // only happens on a genuine return visit (route() now fires exactly
-      // once per navigation — see the comment on navigate() — so this can
-      // no longer be the double-invocation-on-fresh-start case the WP3 fix
-      // guarded against). Whatever got us back here — the ✕-exit button,
-      // a browser/PWA back-gesture, or a hand-edited hash — real time has
-      // passed away from this question, so mark it interrupted here,
-      // covering every such path in one place, not just the button
-      // (WP9 review finding B: the button-only fix left back-gesture/hash
-      // exits still poisoning mastery/median stats with the stale shownAt).
-      if (state.active.current.interrupted) { renderCurrentQuestion(); return; }
-      save(function (s) { MathCore.SessionCore.markInterrupted(s); }).then(function () { renderCurrentQuestion(); });
-      return;
-    }
+    // A leftover `current` (return visit / relaunch / parked) is deferred by
+    // SessionCore.paint itself, so every arrival paints a fresh question with
+    // a live clock (2026-08-28). The old "mark interrupted" branch is gone.
+
     nextFrame(function () {
       var paintedResult = null;
       save(function (s) { paintedResult = MathCore.SessionCore.paint(s, Date.now()); }).then(function (result) {

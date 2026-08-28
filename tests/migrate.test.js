@@ -102,7 +102,7 @@ test("validateImport() rejects an active session with a non-string id", () => {
   assert.ok(result.problems.some((p) => p.indexOf("active.id") !== -1));
 });
 
-test("an imported suspended session is preserved with current.interrupted=true", () => {
+test("an imported suspended session is preserved; its in-flight question is deferred to the end of the queue", () => {
   const raw = sampleRaw();
   raw.active = {
     id: "s_active",
@@ -116,7 +116,7 @@ test("an imported suspended session is preserved with current.interrupted=true",
   };
   const state = Migrate.migrate(raw);
   assert.ok(state.active);
-  assert.equal(state.active.current.interrupted, true);
+  assert.equal(state.active.current, null);
   assert.deepEqual(state.active.planned, ["6x7"]);
 });
 

@@ -121,22 +121,36 @@ test("retry attempts are flagged retry:true and earn 0 coins; the miss is stored
   assert.equal(session.firstTryCorrect, 9);
 });
 
-test("a question resumed after a relaunch is marked interrupted and does not restart shownAt; earns base coins only", () => {
-  const state = freshState();
-  SessionCore.start(state, seededRng(5), 1000);
-  const painted = SessionCore.paint(state, 1000);
-  assert.equal(painted.interrupted, false);
-  const shownAtBefore = state.active.current.shownAt;
+test("a question resumed after a relaunch is deferred to the end of its queue and re-painted fresh (live clock, no restart of the same question)", () => {
+  const rng = () => 0.5;
+  const state = require("../core.js").Migrate.emptyState();
+  SessionCore.start(state, rng, 1000);
+  const first = SessionCore.paint(state, 1000);
+  assert.equal(first.interrupted, false);
+  const firstAsked = first.asked;
+  const queueBefore = state.active.queue.slice();
+  const resumed = SessionCore.paint(state, 50000); // relaunch: paint again with a leftover current
+  assert.notEqual(resumed.asked, firstAsked, "a different question is shown first");
+  assert.equal(resumed.shownAt, 50000);
+  assert.equal(resumed.interrupted, false);
+  assert.equal(state.active.queue[state.active.queue.length - 1], firstAsked, "the interrupted fact went to the end of the queue");
+  assert.equal(state.active.queue.length, queueBefore.length, "nothing lost, nothing duplicated");
+  const result = SessionCore.submit(state, Facts.answer(resumed.asked), 52000, {});
+  assert.equal(result.ok, true);
+  assert.equal(result.interrupted, false);
+});
 
-  // simulate relaunch: paint() called again while a current question exists
-  const resumed = SessionCore.paint(state, 5000);
-  assert.equal(resumed.interrupted, true);
-  assert.equal(resumed.shownAt, shownAtBefore);
-
-  const result = SessionCore.submit(state, Facts.answer(resumed.asked), 5100, {});
+test("a submit while the app is hidden still marks the attempt interrupted (base coins only)", () => {
+  const rng = () => 0.5;
+  const state = require("../core.js").Migrate.emptyState();
+  state.settings.challengeOn = true; state.settings.timeLimitSec = 10;
+  SessionCore.start(state, rng, 1000);
+  const q = SessionCore.paint(state, 1000);
+  SessionCore.markInterrupted(state);
+  assert.equal(state.active.current.interrupted, true);
+  const result = SessionCore.submit(state, Facts.answer(q.asked), 2000, {});
   assert.equal(result.interrupted, true);
-  const attempt = state.active.attempts[0];
-  assert.equal(attempt.withinLimit, false);
+  assert.equal(result.withinLimit, false);
 });
 
 test("markInterrupted (visibilitychange) flags the current question independently of submit", () => {
