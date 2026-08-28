@@ -639,6 +639,73 @@
   var SessionCore = {
     // Creates state.active from a fresh plan. Mutates `state`, returns state.active.
     // `opts.mode` = "typed" (default) | "falling" (docs/FALLING-DESIGN.md).
+    // The rules a session plays by, taken from the CURRENT settings. Falling
+    // mode's ×2 comes from the same withinLimit/timeLimitSec path as Challenge
+    // Mode (F9/I-F4) — no separate timing code in the UI layer.
+    buildSnapshot: function (state, mode) {
+      var falling = state.settings.falling || {};
+      return mode === "falling"
+        ? {
+            challengeOn: true,
+            timeLimitSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+            falling: {
+              durationSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+              options: falling.options || CONFIG.FALLING.DEFAULT_OPTIONS,
+            },
+          }
+        : {
+            challengeOn: !!state.settings.challengeOn,
+            timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+          };
+    },
+
+    // Parent changed settings while a session is suspended: apply them from the
+    // next question (Marat, 2026-08-28 — "the clock set in the parent menu
+    // doesn't operate in the real game").
+    refreshSettings: function (state) {
+      if (!state.active) return null;
+      state.active.settingsSnapshot = SessionCore.buildSnapshot(state, state.active.mode || "typed");
+      return state.active.settingsSnapshot;
+    },
+
+    // One parking slot: a suspended session of the OTHER mode waits in
+    // state.parked while the child plays this one, and comes back when it ends.
+    park: function (state) {
+      if (!state.active) return null;
+      if (state.parked) throw Object.assign(new Error("parking slot occupied"), { code: "PARKED_EXISTS" });
+      state.parked = state.active;
+      state.active = null;
+      return state.parked;
+    },
+
+    unpark: function (state) {
+      if (state.active || !state.parked) return null;
+      state.active = state.parked;
+      state.parked = null;
+      if (state.active.current) state.active.current.interrupted = true; // time passed away from it
+      return state.active;
+    },
+
+    // Makes `mode` the active session: resumes it if it is active or parked,
+    // otherwise parks the current session (if any) and starts a new one.
+    switchTo: function (state, mode, rng, now) {
+      mode = mode === "falling" ? "falling" : "typed";
+      if (state.active && (state.active.mode || "typed") === mode) {
+        SessionCore.refreshSettings(state);
+        return state.active;
+      }
+      if (state.parked && (state.parked.mode || "typed") === mode) {
+        var outgoing = state.active;
+        state.active = state.parked;
+        state.parked = outgoing;
+        if (state.active.current) state.active.current.interrupted = true;
+        SessionCore.refreshSettings(state);
+        return state.active;
+      }
+      if (state.active) SessionCore.park(state);
+      return SessionCore.start(state, rng, now, { mode: mode });
+    },
+
     start: function (state, rng, now, opts) {
       if (state.active) {
         var err = new Error("cannot start: a session is already active (state.active is set)");
@@ -647,23 +714,7 @@
       }
       var mode = opts && opts.mode === "falling" ? "falling" : "typed";
       var planned = Selector.plan(state, rng, now);
-      var falling = state.settings.falling || {};
-      // Falling mode's ×2 comes from the same withinLimit/timeLimitSec path as
-      // Challenge Mode (F9/I-F4) — no separate timing code in the UI layer.
-      var settingsSnapshot =
-        mode === "falling"
-          ? {
-              challengeOn: true,
-              timeLimitSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
-              falling: {
-                durationSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
-                options: falling.options || CONFIG.FALLING.DEFAULT_OPTIONS,
-              },
-            }
-          : {
-              challengeOn: !!state.settings.challengeOn,
-              timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
-            };
+      var settingsSnapshot = SessionCore.buildSnapshot(state, mode);
       var active = {
         id: "s_" + now + "_" + Math.floor(rng() * 1e6),
         startedAt: now,
@@ -934,6 +985,7 @@
 
       state.carryover = nextCarryover;
       state.active = null;
+      if (state.parked) { state.active = state.parked; state.parked = null; if (state.active.current) state.active.current.interrupted = true; } // the parked session returns
 
       return session;
     },
@@ -1110,6 +1162,7 @@
         sessions: [],
         carryover: [],
         active: null,
+        parked: null,
         map: { reached: {} },
       };
     },
@@ -1171,6 +1224,7 @@
           : [],
         carryover: Array.isArray(raw.carryover) ? raw.carryover.slice() : [],
         active: raw.active ? JSON.parse(JSON.stringify(raw.active)) : null,
+        parked: raw.parked ? JSON.parse(JSON.stringify(raw.parked)) : null, // additive 2026-08-28 (one parked session of the other mode)
         // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
         map: { reached: raw.map && raw.map.reached && typeof raw.map.reached === "object" ? JSON.parse(JSON.stringify(raw.map.reached)) : {} },
       };
@@ -1302,9 +1356,18 @@
           });
         }
       }
+      [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
+        var name = pair[0], val = pair[1];
+        if (val === undefined || val === null) return;
+        if (typeof val !== "object" || Array.isArray(val)) { problems.push(name + " must be an object or null"); return; }
+        if (!Array.isArray(val.planned)) problems.push(name + ".planned must be an array");
+        if (!Array.isArray(val.queue)) problems.push(name + ".queue must be an array");
+        if (!Array.isArray(val.retryQueue)) problems.push(name + ".retryQueue must be an array");
+        if (!Array.isArray(val.attempts)) problems.push(name + ".attempts must be an array");
+      });
       if (raw.active !== undefined && raw.active !== null) {
         if (typeof raw.active !== "object" || Array.isArray(raw.active)) {
-          problems.push("active must be an object or null");
+          /* reported above */
         } else {
           var a = raw.active;
           if (!Array.isArray(a.planned)) problems.push("active.planned must be an array");

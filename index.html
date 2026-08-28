@@ -290,7 +290,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.9.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.9.1"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -685,7 +685,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.9.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.9.1"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -957,7 +957,9 @@
     var station = MathCore.Map.currentStation(state);
     var mapLine = station === null ? T.home.mapDone : T.home.mapStatus(station, MathCore.Map.progress(state, station), CONFIG.STATION_REQUIRED);
     var isFallingActive = hasActive && state.active.mode === "falling";
-    var showFallingBtn = !hasActive && !!(state.settings.falling && state.settings.falling.enabled);
+    var typedOpen = (hasActive && !isFallingActive) || (state.parked && (state.parked.mode || "typed") === "typed");
+    var fallingOpen = isFallingActive || (state.parked && state.parked.mode === "falling");
+    var showFallingBtn = !!(state.settings.falling && state.settings.falling.enabled) || fallingOpen;
 
     render(
       '<div class="screen" data-screen="home">' +
@@ -966,8 +968,8 @@
         '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<div class="map-status">' + mapLine + "</div>" +
-        '<button data-action="play">' + (hasActive ? (isFallingActive ? T.home.resumeFallingCta : T.home.resumeCta) : T.home.startCta) + "</button>" +
-        (showFallingBtn ? ' <button data-action="play-falling">' + T.home.fallingBtn + "</button>" : "") +
+        '<button data-action="play">' + (typedOpen ? T.home.resumeCta : T.home.startCta) + "</button>" +
+        (showFallingBtn ? ' <button data-action="play-falling">' + (fallingOpen ? T.home.resumeFallingCta : T.home.fallingBtn) + "</button>" : "") +
         '<div><button class="secondary" data-action="nav-map">' + T.home.mapBtn + "</button> " +
         '<button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
         '<button class="secondary" data-action="nav-rewards">' + T.home.rewardsBtn + "</button></div>" +
@@ -995,27 +997,20 @@
     startOrResumeSession();
   });
 
-  function startOrResumeSession() {
-    var state = S();
-    if (!state.active) {
-      save(function (s) { MathCore.SessionCore.start(s, Math.random, Date.now()); }).then(function (result) {
-        if (result.ok) { navigate("question"); }
-      });
-    } else {
-      navigate("question");
-    }
+  // Typed mode: resume (with the parent's CURRENT settings) or start; a suspended
+  // falling session is parked meanwhile and returns when this one ends.
+  function startOrResumeSession() { switchMode("typed"); }
+
+  function switchMode(mode) {
+    save(function (s) { MathCore.SessionCore.switchTo(s, mode, Math.random, Date.now()); }).then(function (result) {
+      if (result.ok) { navigate("question"); }
+    });
   }
 
   // Falling mode entry (docs/FALLING-DESIGN.md F1) — only reachable when no
   // session is already active; Home hides this button otherwise (one session
   // at a time).
-  function startFallingSession() {
-    var state = S();
-    if (state.active) { navigate("question"); return; }
-    save(function (s) { MathCore.SessionCore.start(s, Math.random, Date.now(), { mode: "falling" }); }).then(function (result) {
-      if (result.ok) { navigate("question"); }
-    });
-  }
+  function startFallingSession() { switchMode("falling"); }
 
   function bindAction(action, handler) {
     var el = document.querySelector('[data-action="' + action + '"]');
@@ -1661,7 +1656,7 @@
         '<button class="secondary" data-action="done">' + T.summary.doneBtn + "</button>" +
         "</div>"
     );
-    bindAction("again", startOrResumeSession);
+    bindAction("again", function () { switchMode(session.mode === "falling" ? "falling" : "typed"); }); // "עוד סבב" stays in the same game
     bindAction("done", function () { navigate("home"); });
     try {
       if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
