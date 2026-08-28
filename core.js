@@ -704,8 +704,7 @@
       }
       // A NEW falling session only when the parent has the mode enabled; a parked
       // one stays resumable above so it can always be finished (review 2026-08-28 #1).
-      if (mode === "falling" && !(state.settings.falling && state.settings.falling.enabled)) mode = "typed";
-      if (state.active && (state.active.mode || "typed") === mode) { SessionCore.refreshSettings(state); return state.active; }
+      if (mode === "falling" && !(state.settings.falling && state.settings.falling.enabled)) return SessionCore.switchTo(state, "typed", rng, now); // re-dispatch so a parked typed session is resumed, not duplicated
       if (state.active) SessionCore.park(state);
       return SessionCore.start(state, rng, now, { mode: mode });
     },

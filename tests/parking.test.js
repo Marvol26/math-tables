@@ -95,3 +95,14 @@ test("[review] validateImport rejects active+parked of the same mode and reports
   const problems = Migrate.validateImport(raw).problems.filter((p) => /active\.current\.asked/.test(p));
   assert.equal(problems.length, 1);
 });
+
+test("[review] disabled-falling tap with a parked typed session and no active one resumes the parked session (no duplicate)", () => {
+  const state = fresh();
+  SessionCore.start(state, rng, 1000);
+  const typedId = state.active.id;
+  state.parked = state.active; state.active = null; // the idempotent-finish shape
+  state.settings.falling.enabled = false;
+  SessionCore.switchTo(state, "falling", rng, 2000);
+  assert.equal(state.active.id, typedId);
+  assert.equal(state.parked, null);
+});
