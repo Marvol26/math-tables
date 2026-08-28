@@ -134,3 +134,5 @@ deviations:
 assumptions discovered: none beyond the above.
 
 ## 2026-08-28T20:40:11Z · designer · 0-R: review (fresh Fable 5) SHIP-AFTER-FIXES → executor fixed HIGH-1 (index-gated replay dropped stations), MEDIUM-2 (import/restore never rebuilt), MEDIUM-3 (validateImport rejected whole backups on clock skew), MEDIUM-4 (11/14 mutants survived → 20 tests added, 14/14 killed), LOW-5/6/7. Fix-verification: all FIXED; NEW-ISSUE-A (skewed t past endedAt replayed after its own boundary) → designer applied the reviewer-validated sort key k=min(t,endedAt) + regression fixture (proved to fail pre-fix: map.reached {} vs {1:…}) + residual journal-station fixture. Suite 188/188. NEW-ISSUE-B (non-monotonic endedAt skews one masteredAfter value) accepted as inherent, noted in NEXT-ACTIONS.
+
+## 2026-08-28T20:40:26Z · designer · package 0 committed+pushed as 59d260a · package S2 baseline = the commit containing this entry (given verbatim in the kickoff prompt)
