@@ -368,3 +368,9 @@ assumptions discovered: none. Push pending Marat.
 
 ## 2026-08-28T11:05:00Z · settings-refresh + parked slot · fix-verification SHIP
 commit: bef9bdf verified by the reviewer (probe re-run); residual LOW (disabled-falling tap with only a parked typed session could start a duplicate) fixed by re-dispatching switchTo as typed after the downgrade + test. Tests 140/140. Push pending Marat.
+
+## 2026-08-28T12:30:00Z · resume defers the in-flight question (turtle on every resume) · committed, review pending
+commit: ff356eb (sw v12 / app 0.9.2 / core.js?v=0.9.2 — not yet deployed)
+evidence: Marat (0.9.1, rev 193) still saw "ממשיכות בלי שעון" on the first screen after opening the app — by the old rule the question a session was suspended on resumes as `interrupted` (no clock), and a parent testing by opening the app always lands on it. New rule: `SessionCore.deferCurrent` moves that question to the end of its queue and a fresh question is painted with a live clock; applied in paint(), park(), switchTo swap, unpark and migrate (load/import); `interrupted` now only marks backgrounding while answering. DESIGN §6 amended. Live-verified: suspend on 3×6 with Challenge on → relaunch → "ממשיכות!" → 6×10 with the turtle running, 3×6 at the queue tail. Tests 141/141 (3 rewritten, 1 new).
+deviations: replaces debate decision R2 #5 ("resumed question is interrupted") — the anti-restart intent is preserved because the same question never resumes with a new clock; it comes back later, fresh.
+assumptions discovered: none. Push pending Marat.
