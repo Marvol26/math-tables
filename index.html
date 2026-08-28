@@ -315,7 +315,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.10.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=079e596c3a"></script> <!-- ?v= is a content hash written by tools/bump-version.js — never edit by hand -->
 <script>
 (function () {
   "use strict";
@@ -714,7 +714,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.10.0"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.11.0"; // set by tools/bump-version.js — do not hand-edit
 
   // ------------------------------------------------------------------
   // Boot / storage glue

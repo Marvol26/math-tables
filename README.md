@@ -41,7 +41,7 @@
 
 ## עדכון האפליקציה
 
-כשמעדכנים את קבצי האפליקציה בשרת, יש **לשנות את הקבוע `VERSION` ב-`sw.js`** ולדחוף (push) לריפו. בלי זה, ה-Service Worker לא יזהה גרסה חדשה והמכשירים ימשיכו להציג את הגרסה הישנה מהמטמון.
+כשמעדכנים את קבצי האפליקציה, מריצים **`node tools/bump-version.js <x.y.z>`** ודוחפים (push) לריפו. הכלי קובע את גרסת האפליקציה, מחשב חתימת תוכן לכל קובץ שמוגש ומעדכן את שם המטמון של ה-Service Worker — בלי זה `npm test` נכשל. בלי הריצה הזו ה-Service Worker לא יזהה גרסה חדשה והמכשירים ימשיכו להציג את הגרסה הישנה מהמטמון.
 
 ## פיתוח מקומי
 
@@ -97,7 +97,7 @@ On the parent entry screen, tap **"שכחתי קוד"** ("forgot PIN"), enter th
 
 ## Updating the app
 
-When deploying updated files, **bump the `VERSION` constant in `sw.js`** and push. Without this, the Service Worker won't detect a new version and devices will keep serving the stale cached version.
+When deploying updated files, run **`node tools/bump-version.js <x.y.z>`** and push. It sets the app version, content-hashes every deployable asset, and rewrites the Service Worker's cache name — `npm test` fails otherwise. Without this, the Service Worker won't detect a new version and devices will keep serving the stale cached version.
 
 ## Local development
 
