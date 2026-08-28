@@ -378,3 +378,9 @@ assumptions discovered: none. Push pending Marat.
 ## 2026-08-28T13:20:00Z · defer-on-resume · closing review → fixes → fix-verification SHIP
 commit: 000c27d
 evidence: review of ff356eb: 2 MEDIUM — (1) at the length-1 boundary the same question came straight back with a fresh clock (×2 farmable; R2 #5 reopened); (2) an exit-to-think re-ask counted as a clean fast first attempt for mastery. Fixed by `active.deferred`: a deferred question is re-asked as `interrupted` (no clock, base coins, not mastery-eligible) while the first question after any resume is fresh with a live clock. LOWs: migrate defers `parked.current`; docs amended; tests tightened + 3 new. Reviewer re-probed boundary, exit-to-think, bookkeeping, migrate idempotence → SHIP. Tests 144/144. Push pending Marat.
+
+## 2026-08-28T14:00:00Z · session close-out (designer session reset)
+commit: d345112 pushed; working tree clean (only untracked .claude/).
+evidence: live sw v12 / app 0.9.2 confirmed by curl. No background agents, no local server, no browser tabs. Open items and Marat's device pass recorded in NEXT-ACTIONS.md; skill proposals in docs/SKILL-PROPOSALS-2026-08-28.md; brain capture note staged in ~/brain/inbox/math-tables-2026-08-28.md (not filed — awaits Marat's yes per rule 6).
+deviations: none
+assumptions discovered: none

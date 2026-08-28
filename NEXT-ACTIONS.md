@@ -157,3 +157,27 @@ device if this tool limitation persists.
 - **LOW — 6-bubble layout at 320px width: bubbles can overlap by a few px per side**, since 6 lanes at ~50px each hold 56px bubbles. An edge tap in the overlap zone could hit the neighbouring bubble. Combined with the already-recorded unverified small-viewport check (WP-F3 entry above) — both point at the same residual: pixel-verify 320px-wide + 6-option layouts on a real device or working device emulation.
 - **LOW — "עוד סבב!" on a falling summary always starts a typed session**, not another falling round. Design-conformant (FALLING-DESIGN §4 says "Summary: unchanged") but possibly not what a child who just finished a balloon round expects. Marat's call whether "עוד סבב!" should be mode-aware.
 - **LOW — backgrounding mid-fall (visibilitychange) gives no visual cue that the ×2 window is gone.** `markInterrupted` fires but the falling screen isn't re-rendered until the child returns, so bubbles keep visually falling with no "ממשיכות בלי שעון" label until the next paint. Same behavior class as typed mode's existing turtle-timer handling; not falling-specific, noted for completeness only.
+
+## Session close-out 2026-08-28 (designer session 651c8ef0 reset)
+State: everything pushed — live 0.9.2 / sw v12 (commit d345112). Tests 144/144. No open reviews.
+
+### Marat's device pass (only he can do these)
+1. iPad: tap "רענני" → "ממשיכות!" should open on a fresh question with the turtle; then "מספרים נופלים 🎈" (balloons, 6 options set; use 4 on the iPhone).
+2. **Cloud backup token** (README "גיבוי אוטומטי לענן", 3 steps) — until set, progress lives only on the iPad.
+3. One falling round in **portrait** on iPad and iPhone (layouts were measured headless, never on real hardware).
+4. Export via the share sheet in the Home-Screen app → confirm a file lands in Files (P13).
+5. 2FA on the GitHub account (repo is public; branch protection + issues/wiki off already applied).
+6. Later: 8-day storage-retention check (A1).
+
+### Open decisions (blocked on Marat)
+- Show the correct answer after a miss (current: yes, 1.8 s → picture). Both reviewers flagged it as a "clue"; kept as designed.
+- Mastery rule "3 in a row" vs "3 of last 4" if the turtle stalls at 9/10 for weeks.
+- tarbut (ועד בית, Flask+SQLite, resident financial data): "any place any time" needs an always-on tailnet host (option 2: €4–5/mo VPS + Tailscale) — a design-to-build cycle if chosen. NOT a static-hosting candidate; never public.
+- Whether to create the proposed skills (docs/SKILL-PROPOSALS-2026-08-28.md).
+
+### Deferred LOWs (from reviews, not fixed)
+- Stale comments at index.html seededRng (~1165) and exit-yes (~1587) mention the removed "short-circuit" branch.
+- Landscape 568×320 falling: label + bottom exit line below the fold (page scrolls).
+- Desktop export fallback marks lastExportAt even on old iOS (<15) preview path.
+- Every save writes localStorage twice (mirror + lastgood) — fine under quota, noted.
+- findGist first page only (100 gists); one account = one child.
