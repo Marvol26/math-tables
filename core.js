@@ -729,6 +729,7 @@
         retryQueue: [],
         attempts: [],
         current: null,
+        deferred: [],
       };
       state.active = active;
       return active;
@@ -746,6 +747,10 @@
       var q = c.retry ? active.retryQueue : active.queue;
       var idx = q.indexOf(c.asked);
       if (idx !== -1) { q.splice(idx, 1); q.push(c.asked); }
+      // Remember it: when it comes back it is re-asked WITHOUT a clock and does
+      // not feed mastery (she has already seen it — review 2026-08-28 #1/#2).
+      if (!Array.isArray(active.deferred)) active.deferred = [];
+      if (active.deferred.indexOf(c.asked) === -1) active.deferred.push(c.asked);
       active.current = null;
       return c.asked;
     },
@@ -760,11 +765,13 @@
       var asked = fromRetry ? active.retryQueue[0] : active.queue[0];
       if (!asked) return null; // nothing left to paint; caller should finish()
       var key = Facts.key.apply(null, Facts.parts(asked));
+      var wasDeferred = Array.isArray(active.deferred) && active.deferred.indexOf(asked) !== -1;
+      if (wasDeferred) active.deferred.splice(active.deferred.indexOf(asked), 1);
       active.current = {
         key: key,
         asked: asked,
         shownAt: now,
-        interrupted: false,
+        interrupted: wasDeferred, // a previously seen question: no clock, base coins, not mastery-eligible
         retry: fromRetry,
       };
       return active.current;
@@ -1247,9 +1254,10 @@
       // Any resumed session (fresh boot or import onto another device): the
       // in-flight question is deferred to the end of its queue and re-asked
       // fresh later (DESIGN §6, amended 2026-08-28; replaces the "interrupted" rule).
-      if (state.active && state.active.current) {
-        SessionCore.deferCurrent({ active: state.active });
-      }
+      if (state.active && state.active.current) SessionCore.deferCurrent({ active: state.active });
+      if (state.parked && state.parked.current) SessionCore.deferCurrent({ active: state.parked });
+      if (state.active && !Array.isArray(state.active.deferred)) state.active.deferred = [];
+      if (state.parked && !Array.isArray(state.parked.deferred)) state.parked.deferred = [];
       if (state.active) {
         state.active.mode = state.active.mode === "falling" ? "falling" : "typed";
       }
@@ -1381,6 +1389,7 @@
         if (!Array.isArray(val.queue)) problems.push(name + ".queue must be an array");
         if (!Array.isArray(val.retryQueue)) problems.push(name + ".retryQueue must be an array");
         if (!Array.isArray(val.attempts)) problems.push(name + ".attempts must be an array");
+        if (val.deferred !== undefined && !Array.isArray(val.deferred)) problems.push(name + ".deferred must be an array");
       });
       [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
         var name = pair[0], a = pair[1];

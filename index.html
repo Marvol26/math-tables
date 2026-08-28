@@ -1584,7 +1584,7 @@
     document.body.appendChild(overlay);
     overlay.querySelector('[data-action="exit-yes"]').addEventListener("click", function () {
       document.body.removeChild(overlay); // exit only suspends (D12) — state.active already journaled
-      // The in-flight question gets marked interrupted on the RETURN visit
+      // The in-flight question is deferred on the RETURN visit (SessionCore.paint)
       // (paintNextQuestion's short-circuit branch), not here — that covers
       // every way of leaving mid-question (this button, a back-gesture, a
       // hand-edited hash) in one place instead of only this one exit path

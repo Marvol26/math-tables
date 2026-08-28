@@ -57,3 +57,7 @@ All three round-3 items RESOLVED. **APPROVE.**
 ## Outcome
 Codex gpt-5.6-sol / high, 4 rounds, 22 items raised (7 BLOCKER, 15 MAJOR), 19 accepted, 3 rebutted (checksum/merge protocol, quota alarm, lease/fencing) — Codex accepted the rebuttals once a real commit gate existed.
 Shared assumptions neither model verified empirically (build-checklist items): iOS ITP eviction exemption for Home-Screen apps; `navigator.storage.persist()` behaviour on iOS; `100dvh` in standalone mode; the unlock-curve pacing (needs a simulation).
+
+
+### Amendment 2026-08-28 (R2 #5)
+The "resumed question is interrupted" rule made every resume start without a clock (the parent's complaint). Replaced by: the suspended-on question is deferred to the end of its queue and re-asked later as `interrupted`; the first question after a resume is fresh with a live clock. The anti-restart property (never a fresh ×2 on a pre-seen question) is preserved via `active.deferred`.

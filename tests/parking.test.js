@@ -109,3 +109,64 @@ test("[review] disabled-falling tap with a parked typed session and no active on
   assert.equal(state.active.id, typedId);
   assert.equal(state.parked, null);
 });
+
+// --- review 2026-08-28: deferred questions never get a fresh clock ---
+test("[review] length-1 boundary: the suspended-on question that comes straight back is interrupted (no ×2), typed queue and retry queue", () => {
+  const state = fresh();
+  state.settings.challengeOn = true; state.settings.timeLimitSec = 10;
+  SessionCore.switchTo(state, "typed", rng, 1000);
+  // answer 9 correctly
+  for (let i = 0; i < 9; i++) { SessionCore.paint(state, 2000 + i * 100); SessionCore.submit(state, Facts.answer(state.active.current.asked), 2050 + i * 100, {}); }
+  const last = SessionCore.paint(state, 5000);
+  SessionCore.deferCurrent(state); // relaunch / exit on the last question
+  const again = SessionCore.paint(state, 60000);
+  assert.equal(again.asked, last.asked);
+  assert.equal(again.interrupted, true, "same question back → no clock");
+  const r = SessionCore.submit(state, Facts.answer(again.asked), 60500, {});
+  assert.equal(r.withinLimit, false);
+  // retry queue boundary
+  const s2 = fresh(); s2.settings.challengeOn = true;
+  SessionCore.start(s2, rng, 1000);
+  SessionCore.paint(s2, 1000); SessionCore.submit(s2, -1, 1500, {}); // one miss → retryQueue
+  for (let i = 0; i < 9; i++) { SessionCore.paint(s2, 2000 + i * 100); SessionCore.submit(s2, Facts.answer(s2.active.current.asked), 2050 + i * 100, {}); }
+  const retry = SessionCore.paint(s2, 5000);
+  assert.equal(retry.retry, true);
+  SessionCore.deferCurrent(s2);
+  const retryAgain = SessionCore.paint(s2, 9000);
+  assert.equal(retryAgain.asked, retry.asked);
+  assert.equal(retryAgain.interrupted, true);
+});
+
+test("[review] a deferred question re-asked later is interrupted (not mastery-eligible); the first question after resume is fresh", () => {
+  const state = fresh();
+  SessionCore.start(state, rng, 1000);
+  const seen = SessionCore.paint(state, 1000).asked;
+  SessionCore.deferCurrent(state);
+  const first = SessionCore.paint(state, 5000);
+  assert.notEqual(first.asked, seen);
+  assert.equal(first.interrupted, false);
+  let found = null, guard = 0;
+  while (guard++ < 20) {
+    SessionCore.submit(state, Facts.answer(state.active.current.asked), 5500 + guard * 100, {});
+    const q = SessionCore.paint(state, 6000 + guard * 100);
+    if (!q) break;
+    if (q.asked === seen) { found = q; break; }
+  }
+  assert.ok(found, "the deferred question comes back");
+  assert.equal(found.interrupted, true);
+});
+
+test("[review] park() defers directly and migrate defers a parked in-flight question from an old backup", () => {
+  const state = fresh();
+  SessionCore.start(state, rng, 1000);
+  SessionCore.paint(state, 1000);
+  const asked = state.active.current.asked;
+  SessionCore.park(state);
+  assert.equal(state.parked.current, null);
+  assert.deepEqual(state.parked.deferred, [asked]);
+  const raw = Migrate.emptyState();
+  raw.parked = { id: "p", mode: "falling", planned: ["2x3"], queue: ["2x3"], retryQueue: [], attempts: [], current: { asked: "2x3", key: "2x3", shownAt: 5, retry: false, interrupted: false } };
+  const m = Migrate.migrate(raw);
+  assert.equal(m.parked.current, null);
+  assert.deepEqual(m.parked.deferred, ["2x3"]);
+});

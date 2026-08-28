@@ -17,7 +17,7 @@ An optional second way to play. An expression (e.g. `7 × 8`) is shown at the to
 | F7 | Distractors (pure, in core, tested): for `a×b=p` generate candidates in priority order: `(a±1)×b`, `a×(b±1)` (same-table neighbours), `p±a`, `p±b`, digit swap of `p` (two distinct digits), `a+b`, `p±10`; keep unique, ≠ p, 1…100; take `options−1`; if short, fill with random products of other facts within ±20 of p. Shuffle positions. |
 | F8 | Layout: each candidate is a big round bubble (≥ 64 px) in its own lane (`options` lanes across the width, order shuffled), falling with a CSS animation whose duration = `durationSec`; bubbles wobble slightly; tapping any bubble submits it. On the Mac, keys 1–N pick the bubble in that lane (left→right) as a keyboard path. |
 | F9 | Timing/KPIs: `shownAt` at paint, `withinLimit` = tapped before landing; attempts recorded like typed ones with `mode:"falling"`; `Stats` excludes falling attempts from speed/accuracy/mastery (they are only in the session history and coin trend). |
-| F10 | Exit/suspend works exactly as in typed mode (`state.active` journal); a resumed falling question is `interrupted` → bubbles already landed, no ×2. |
+| F10 | Exit/suspend works exactly as in typed mode (`state.active` journal). Amended 2026-08-28: the question the round was suspended on is deferred; when it returns it renders already landed (no ×2); every other question after a resume falls normally. |
 
 ## 3. Data
 - `settings.falling = { enabled:false, durationSec:8, options:4 }` (migrate default; additive; schema stays 1).

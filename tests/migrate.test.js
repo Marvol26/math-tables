@@ -117,6 +117,7 @@ test("an imported suspended session is preserved; its in-flight question is defe
   const state = Migrate.migrate(raw);
   assert.ok(state.active);
   assert.equal(state.active.current, null);
+  assert.ok(state.active.queue.includes("6x7"), "the deferred question is still in the queue");
   assert.deepEqual(state.active.planned, ["6x7"]);
 });
 
