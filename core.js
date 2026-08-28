@@ -33,6 +33,11 @@
     STREAK_LENGTH: 5,
     STREAK_BONUS: 2,
     PERFECT_BONUS: 5,
+    // Perfect-series extra (Marat 2026-08-28): index = consecutive perfect rounds
+    // minus 1, last entry repeats. 1st perfect: +0 extra, 2nd in a row: +5, 3rd+: +10.
+    // The series counts across both game modes and across days; any non-perfect
+    // round resets it. Replaces the "first perfect of the day only" cap (R1 #6).
+    PERFECT_SERIES_EXTRA: [0, 5, 10],
     NEAR_PERFECT_MIN_CORRECT: 9,
     NEAR_PERFECT_BONUS: 2,
 
@@ -234,21 +239,21 @@
       return result;
     },
 
-    hasPerfectBonusToday: function (ledger, t) {
-      var day = new Date(t);
-      return ledger.some(function (e) {
-        if (e.type !== "earn" || !/_perfect$/.test(e.id)) return false;
-        var d = new Date(e.t);
-        return (
-          d.getFullYear() === day.getFullYear() &&
-          d.getMonth() === day.getMonth() &&
-          d.getDate() === day.getDate()
-        );
-      });
+    // Number of consecutive perfect sessions ending with the most recent one
+    // (0 when the last session was not perfect). Pure; sessions are chronological.
+    perfectSeriesLength: function (sessions) {
+      var n = 0;
+      for (var i = sessions.length - 1; i >= 0; i--) {
+        if (!sessions[i].perfect) break;
+        n++;
+      }
+      return n;
     },
 
-    perfectBonusAmount: function (ledger, t) {
-      return Economy.hasPerfectBonusToday(ledger, t) ? 0 : CONFIG.PERFECT_BONUS;
+    // Extra coins for a series of `n` consecutive perfect rounds (n >= 1).
+    perfectSeriesExtra: function (n) {
+      var table = CONFIG.PERFECT_SERIES_EXTRA;
+      return table[Math.min(n, table.length) - 1];
     },
 
     nearPerfectBonusAmount: function (firstTryCorrect) {
@@ -820,19 +825,17 @@
           retry: false,
           withinLimit: withinLimit,
         });
-        // Falling mode is recognition, not recall (docs/FALLING-DESIGN.md F4/I-F1):
-        // it earns coins but never touches facts/mastery/carryover/map.
-        if (active.mode !== "falling") {
-          Facts.updateFromAttempt(state, current.key, {
-            ok: ok,
-            ms: ms,
-            asked: current.asked,
-            t: now,
-            withinLimit: withinLimit,
-            interrupted: !!current.interrupted,
-            retry: false,
-          });
-        }
+        // Falling now counts for mastery/map, exactly like typed answers
+        // (Marat 2026-08-28); only carryover stays typed-only (docs/FALLING-DESIGN.md F4/I-F1).
+        Facts.updateFromAttempt(state, current.key, {
+          ok: ok,
+          ms: ms,
+          asked: current.asked,
+          t: now,
+          withinLimit: withinLimit,
+          interrupted: !!current.interrupted,
+          retry: false,
+        });
       }
 
       active.attempts.push(attemptRecord);
@@ -921,18 +924,30 @@
       });
 
       var perfect = firstTryCorrect === active.planned.length;
+      var perfectSeries = 0;
       if (perfect) {
-        var perfectAmount = Economy.perfectBonusAmount(state.economy.ledger, now);
-        if (perfectAmount > 0) {
+        // Computed BEFORE the session record is pushed to `state.sessions` below.
+        perfectSeries = Economy.perfectSeriesLength(state.sessions) + 1;
+        Economy.ledgerAppend(state, {
+          id: "l_" + sid + "_perfect",
+          t: now,
+          type: "earn",
+          amount: CONFIG.PERFECT_BONUS,
+          ref: sid,
+          note: "perfect",
+        });
+        totalCoins += CONFIG.PERFECT_BONUS;
+        var seriesExtra = Economy.perfectSeriesExtra(perfectSeries);
+        if (seriesExtra > 0) {
           Economy.ledgerAppend(state, {
-            id: "l_" + sid + "_perfect",
+            id: "l_" + sid + "_series",
             t: now,
             type: "earn",
-            amount: perfectAmount,
+            amount: seriesExtra,
             ref: sid,
-            note: "perfect",
+            note: "perfect-series",
           });
-          totalCoins += perfectAmount;
+          totalCoins += seriesExtra;
         }
       } else {
         var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect);
@@ -955,13 +970,10 @@
       var isFalling = active.mode === "falling";
 
       // Journey map: stations reached in this session are permanent (never fall).
-      // Falling mode is recognition, not recall (F4/I-F1) — it never moves the map.
-      var stationsReached = [];
-      if (!isFalling) {
-        if (!state.map) state.map = { reached: {} };
-        stationsReached = Map.newlyReached(state);
-        stationsReached.forEach(function (n) { state.map.reached[n] = now; });
-      }
+      // Falling now counts for the map too (Marat 2026-08-28), like typed sessions.
+      if (!state.map) state.map = { reached: {} };
+      var stationsReached = Map.newlyReached(state);
+      stationsReached.forEach(function (n) { state.map.reached[n] = now; });
 
       var masteredAfter = Facts.allKeys().filter(function (k) {
         return Facts.mastery(Facts.getFact(state, k)) === "mastered";
@@ -993,6 +1005,7 @@
         misses: misses,
         coinsEarned: totalCoins,
         perfect: perfect,
+        perfectSeries: perfectSeries,
         masteredAfter: masteredAfter,
         unlocksEarned: unlocksEarned,
         stationsReached: stationsReached,
@@ -1076,13 +1089,16 @@
 
     trends: function (state, n) {
       var sessions = state.sessions.slice(-n);
-      // Falling mode is recognition, not recall (F4/I-F1): it never moves
-      // accuracy/speed/mastery trends, but it does still earn coins. Filter
-      // BEFORE windowing (not after) — a run of falling sessions must not
-      // push typed history out of the learning-trend window (WP-F1 gate
-      // review, MEDIUM: a child who prefers falling would otherwise see
-      // blank accuracy/speed/mastery charts once 30 falling sessions in a
-      // row outrun the window, even though real typed history exists).
+      // Falling now moves mastery/map like typed answers (Marat 2026-08-28),
+      // so masteredCount is windowed from ALL sessions (`sessions`, not
+      // `learningSessions`). accuracy/avgMs STAY typed-only: a 4-option tap
+      // has a 25% guess floor and tap time != recall time, so those two stay
+      // filtered to typed sessions. Filter BEFORE windowing (not after) — a
+      // run of falling sessions must not push typed history out of the
+      // accuracy/avgMs window (WP-F1 gate review, MEDIUM: a child who
+      // prefers falling would otherwise see blank accuracy/speed charts once
+      // 30 falling sessions in a row outrun the window, even though real
+      // typed history exists).
       var learningSessions = state.sessions
         .filter(function (s) { return (s.mode || "typed") !== "falling"; })
         .slice(-n);
@@ -1091,7 +1107,7 @@
           return s.planned.length ? s.firstTryCorrect / s.planned.length : 0;
         }),
         avgMs: learningSessions.map(Stats.sessionAvgMs),
-        masteredCount: learningSessions.map(function (s) { return s.masteredAfter; }),
+        masteredCount: sessions.map(function (s) { return s.masteredAfter; }),
         coins: sessions.map(function (s) { return s.coinsEarned; }),
       };
     },
@@ -1349,6 +1365,7 @@
             if (typeof session.firstTryCorrect !== "number") problems.push("sessions[" + i + "].firstTryCorrect must be a number");
             if (typeof session.coinsEarned !== "number") problems.push("sessions[" + i + "].coinsEarned must be a number");
             if (typeof session.masteredAfter !== "number") problems.push("sessions[" + i + "].masteredAfter must be a number");
+            if (session.perfectSeries !== undefined && (typeof session.perfectSeries !== "number" || session.perfectSeries < 0)) problems.push("sessions[" + i + "].perfectSeries must be a non-negative number");
           });
         }
       }

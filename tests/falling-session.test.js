@@ -53,19 +53,24 @@ test("falling: start() sets active.mode and a falling settingsSnapshot", () => {
   assert.equal(state.active.settingsSnapshot.falling.options, 4);
 });
 
-test("falling: a perfect session leaves facts, carryover, map.reached untouched but pays coins", () => {
+test("a perfect falling session updates facts and pays coins; carryover stays untouched", () => {
   const state = freshState();
   const factsBefore = JSON.parse(JSON.stringify(state.facts));
   const carryoverBefore = JSON.parse(JSON.stringify(state.carryover));
-  const mapBefore = JSON.parse(JSON.stringify(state.map));
 
   const session = playSession(state, seededRng(2), 1000, { mode: "falling" }, 0);
 
-  assert.deepEqual(state.facts, factsBefore);
+  // Balloon sessions now count for mastery, exactly like typed answers
+  // (Marat 2026-08-28): attempts incremented for every planned fact.
+  assert.notDeepEqual(state.facts, factsBefore);
+  session.planned.forEach((asked) => {
+    const key = Facts.key.apply(null, Facts.parts(asked)); // "asked" may be non-canonical direction (e.g. "6x1")
+    assert.ok(state.facts[key], "fact " + key + " must have been touched");
+    assert.equal(state.facts[key].attempts, 1);
+  });
+  // Carryover stays typed-only — falling never touches it (D1).
   assert.deepEqual(state.carryover, carryoverBefore);
-  assert.deepEqual(state.map, mapBefore);
   assert.equal(session.mode, "falling");
-  assert.equal(session.stationsReached.length, 0);
   assert.ok(session.coinsEarned > 0);
   const earnEntry = state.economy.ledger.find((e) => e.id === "l_" + session.id + "_earn");
   assert.ok(earnEntry);
@@ -120,7 +125,9 @@ function masteredFact(key) {
 // same-state positive control proving a typed session on the identical
 // fixture DOES mark it reached — so the fixture is proven capable of
 // triggering the map, making the falling-mode assertion meaningful.
-test("falling: a station that would be reached this session is NOT reached in falling mode (map guard)", () => {
+// Balloon sessions now count for the map too (Marat 2026-08-28): the guard
+// that used to skip Map.newlyReached() for falling mode is gone.
+test("a station whose 10th fact is mastered in a falling session IS reached", () => {
   const state = freshState();
   for (let i = 1; i <= 10; i++) {
     state.facts[Facts.key(1, i)] = masteredFact(Facts.key(1, i));
@@ -129,8 +136,9 @@ test("falling: a station that would be reached this session is NOT reached in fa
   assert.equal(MapCore.isReached(state, 1), false);
 
   const session = playSession(state, seededRng(6), 1000, { mode: "falling" }, 0);
-  assert.equal(session.stationsReached.length, 0);
-  assert.equal(MapCore.isReached(state, 1), false);
+  assert.deepEqual(session.stationsReached, [1]);
+  assert.equal(MapCore.isReached(state, 1), true);
+  assert.ok(state.map.reached[1]);
 });
 
 test("falling: positive control — the same 10/10-mastered fixture IS reached by a typed session", () => {
@@ -143,4 +151,39 @@ test("falling: positive control — the same 10/10-mastered fixture IS reached b
   const session = playSession(state, seededRng(6), 1000, undefined, 0);
   assert.deepEqual(session.stationsReached, [1]);
   assert.equal(MapCore.isReached(state, 1), true);
+});
+
+// Balloon taps now feed mastery under the exact same rule as typed answers
+// (Marat 2026-08-28): last 3 correct, non-interrupted, median ms <= threshold.
+// Mastery uses the MEDIAN of the last 3 correct attempts (core.js Facts.mastery):
+// with two equal seeded values the median is pinned to that value regardless
+// of the 3rd attempt's ms, so the two seeds must straddle the threshold (one
+// far below, one far above) for the balloon tap's own ms to become the
+// median and decide mastered vs. learning on its own.
+test("a balloon tap masters a fact under the normal rule", () => {
+  const key = "6x7";
+  function seedStraddling(state) {
+    Facts.updateFromAttempt(state, key, { ok: true, ms: 0, asked: key, t: 0, withinLimit: true, interrupted: false, retry: false });
+    Facts.updateFromAttempt(state, key, { ok: true, ms: 999999, asked: key, t: 1, withinLimit: true, interrupted: false, retry: false });
+  }
+  function playSingleFallingQuestion(state, seed, ms) {
+    SessionCore.start(state, seededRng(seed), 1000, { mode: "falling" });
+    // Force this single-question session onto our target key, bypassing the
+    // normal Selector-chosen plan, so the fact under test is the one asked.
+    state.active.planned = [key];
+    state.active.queue = [key];
+    const current = SessionCore.paint(state, 2000);
+    SessionCore.submit(state, Facts.answer(current.asked), 2000 + ms, {});
+    return SessionCore.finish(state, 2000 + ms + 1);
+  }
+
+  const fastState = freshState();
+  seedStraddling(fastState);
+  playSingleFallingQuestion(fastState, 30, CONFIG.MASTERY_MS_THRESHOLD);
+  assert.equal(Facts.mastery(fastState.facts[key]), "mastered");
+
+  const slowState = freshState();
+  seedStraddling(slowState);
+  playSingleFallingQuestion(slowState, 31, CONFIG.MASTERY_MS_THRESHOLD + 1000);
+  assert.equal(Facts.mastery(slowState.facts[key]), "learning");
 });

@@ -178,6 +178,20 @@
     position: relative; z-index: 3; background: rgba(255,255,255,0.92); border-radius: 20px;
     padding: 0.6rem 1.2rem; box-shadow: 0 6px 18px rgba(79,124,255,0.12); margin-top: 1.6rem;
   }
+  /* Feedback floats over the lanes instead of growing the card, so the
+     balloons never move when the badge or the picture appears (Marat 2026-08-28).
+     `.fast-badge`'s `pop` animation drives `transform: scale(...)` itself, which
+     would override a static `transform: translateX(-50%)` centring during the
+     animation — centred with left/right/margin instead, for all three rules. */
+  [data-screen="question"][data-falling="1"] .question-info > .fast-badge,
+  [data-screen="question"][data-falling="1"] .question-info > .wrong-helper,
+  [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
+    position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; margin: 0 auto;
+    z-index: 6; width: fit-content; max-width: min(92vw, 520px);
+    background: var(--card-bg); border-radius: 20px; padding: 0.8rem 1rem;
+    box-shadow: 0 10px 28px rgba(43,45,66,0.22);
+    max-height: calc(100dvh - 260px); overflow-y: auto;
+  }
   .cloud { position: absolute; left: 0; z-index: 0; width: 120px; height: 44px; background: #fff; border-radius: 40px; opacity: 0.85; pointer-events: none;
     animation: cloud-drift var(--cd, 40s) linear infinite; }
   .cloud::before, .cloud::after { content: ""; position: absolute; background: #fff; border-radius: 50%; }
@@ -192,15 +206,18 @@
   .lane:nth-child(6n+1) { --c: #FF6F91; --ct: #fff; }
   .lane:nth-child(6n+2) { --c: #4F7CFF; --ct: #fff; }
   .lane:nth-child(6n+3) { --c: #3CC97A; --ct: #fff; }
-  .lane:nth-child(6n+4) { --c: #FFC93C; --ct: #2B2D42; }
+  .lane:nth-child(6n+4) { --c: #F2A600; --ct: #fff; }
   .lane:nth-child(6n+5) { --c: #B388FF; --ct: #fff; }
-  .lane:nth-child(6n+6) { --c: #FF9F68; --ct: #2B2D42; }
+  .lane:nth-child(6n+6) { --c: #FF7A3D; --ct: #fff; }
   .bubble {
     position: absolute; top: -110px; left: 50%; z-index: 1;
     width: 68px; height: 78px; padding: 0; border: none; cursor: pointer;
     border-radius: 50% 50% 50% 50% / 46% 46% 54% 54%;
-    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.75) 0, rgba(255,255,255,0.25) 22%, var(--c) 48%, color-mix(in srgb, var(--c) 78%, #000) 100%);
-    color: var(--ct); font: inherit; font-weight: bold; font-size: 1.35rem;
+    background:
+      radial-gradient(circle at 30% 22%, rgba(255,255,255,0.65) 0, rgba(255,255,255,0) 16%),
+      radial-gradient(circle at 50% 40%, var(--c) 0, var(--c) 55%, color-mix(in srgb, var(--c) 72%, #000) 100%);
+    color: #fff; font: inherit; font-weight: bold; font-size: 1.5rem;
+    text-shadow: 0 1px 0 rgba(0,0,0,0.55), 0 0 6px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.9);
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 6px 14px rgba(0,0,0,0.18), inset -6px -8px 14px rgba(0,0,0,0.12);
     transform: translateX(-50%);
@@ -252,6 +269,14 @@
     [data-screen="question"][data-falling="1"] .bubble::after { height: 16px; }
     @keyframes bubble-fall { from { top: -90px; } to { top: calc(100% - 92px); } }
     [data-screen="question"][data-falling="1"] .bubble.landed { top: calc(100% - 92px); }
+    /* Landscape: the floating feedback would otherwise be squeezed into a
+       ~100px scroll box (review 2026-08-28 MEDIUM-1) — pin it to the viewport.
+       No ancestor carries a transform/filter, so `fixed` escapes .screen. */
+    [data-screen="question"][data-falling="1"] .question-info > .fast-badge,
+    [data-screen="question"][data-falling="1"] .question-info > .wrong-helper,
+    [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
+      position: fixed; top: 0.4rem; max-height: calc(100dvh - 0.8rem);
+    }
   }
   #stale-card {
     display: none;
@@ -290,7 +315,7 @@
   <button data-action="reload-for-update" style="margin-inline-start:0.75rem;background:#fff;color:var(--primary);padding:0.3rem 0.8rem"></button>
 </div>
 
-<script src="core.js?v=0.9.2"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
+<script src="core.js?v=0.10.0"></script> <!-- keep ?v= in sync with APP_VERSION and sw.js PRECACHE_URLS -->
 <script>
 (function () {
   "use strict";
@@ -382,6 +407,10 @@
       nextSessionBtn: "עוד סבב!",
       doneBtn: "סיימנו",
       coinsEarned: function (n) { return bdi("+" + n) + " 🪙"; },
+      perfectSeriesTitle: function (n) { return bdi(n) + " בסדרה!!! 🎆🎆"; },
+      perfectSeriesSub: "שני סבבים מושלמים ברצף! מדהים!",
+      perfectSeriesSub3: "שלושה סבבים מושלמים ברצף (או יותר)! אלופה!!!",
+      seriesBonus: function (n) { return "בונוס סדרה " + bdi("+" + n) + " 🪙"; },
     },
 
     map: {
@@ -685,7 +714,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.9.2"; // keep in sync with sw.js VERSION (WP5)
+  var APP_VERSION = "0.10.0"; // keep in sync with sw.js VERSION (WP5)
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -942,6 +971,13 @@
     finishBtn.addEventListener("click", function () { navigate("home"); });
   }
 
+  // Shared by Home and the falling screen (WP-A, Marat 2026-08-28): the same
+  // "🐢 station X/Y" or "reached the castle" line, computed once.
+  function mapStatusLine(state) {
+    var station = MathCore.Map.currentStation(state);
+    return station === null ? T.home.mapDone : T.home.mapStatus(station, MathCore.Map.progress(state, station), CONFIG.STATION_REQUIRED);
+  }
+
   // ------------------------------------------------------------------
   // Screen: Home (DESIGN §9.1)
   // ------------------------------------------------------------------
@@ -954,8 +990,7 @@
     var daysSinceExport = lastExport ? (Date.now() - lastExport) / (1000 * 60 * 60 * 24) : Infinity;
     var showBackup = daysSinceExport > 14 && state.sessions.length > 0;
     var childName = (state.settings.childName || "").trim();
-    var station = MathCore.Map.currentStation(state);
-    var mapLine = station === null ? T.home.mapDone : T.home.mapStatus(station, MathCore.Map.progress(state, station), CONFIG.STATION_REQUIRED);
+    var mapLine = mapStatusLine(state);
     var isFallingActive = hasActive && state.active.mode === "falling";
     var typedOpen = (hasActive && !isFallingActive) || (state.parked && (state.parked.mode || "typed") === "typed");
     var fallingOpen = isFallingActive || (state.parked && state.parked.mode === "falling");
@@ -968,8 +1003,8 @@
         '<div class="coin-pill">🪙 ' + bdi(totals.lifetimeCoins) + "</div>" +
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<div class="map-status">' + mapLine + "</div>" +
-        '<button data-action="play">' + (typedOpen ? T.home.resumeCta : T.home.startCta) + "</button>" +
-        (showFallingBtn ? ' <button data-action="play-falling">' + (fallingOpen ? T.home.resumeFallingCta : T.home.fallingBtn) + "</button>" : "") +
+        (showFallingBtn ? '<div><button data-action="play-falling">' + (fallingOpen ? T.home.resumeFallingCta : T.home.fallingBtn) + "</button></div>" : "") +
+        '<div><button data-action="play">' + (typedOpen ? T.home.resumeCta : T.home.startCta) + "</button></div>" +
         '<div><button class="secondary" data-action="nav-map">' + T.home.mapBtn + "</button> " +
         '<button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
         '<button class="secondary" data-action="nav-rewards">' + T.home.rewardsBtn + "</button></div>" +
@@ -1226,7 +1261,8 @@
         '<div class="question-info">' +
         '<div class="dots">' + dotsHtml + "</div>" +
         '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
-        (current.interrupted ? '<div class="muted">' + T.question.interruptedLabel + "</div>" : "") +
+        '<div class="map-status">' + mapStatusLine(state) + "</div>" +
+        (current.interrupted ? '<div class="muted interrupted-label">' + T.question.interruptedLabel + "</div>" : "") +
         '<div class="coin-pill">' + T.question.equalsCoin(value) + "</div>" +
         '<div class="equation ltr" id="equation">' +
         "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span>" +
@@ -1613,11 +1649,17 @@
   function renderSummary(session) {
     var stars = session.firstTryCorrect === session.planned.length ? 3 : session.firstTryCorrect >= 8 ? 2 : 1;
     var fallingSuffix = session.mode === "falling" ? " 🎈" : "";
-    var titleHtml = session.perfect
-      ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + fallingSuffix + "</h1><p>" + T.summary.perfectSub + "</p>"
-      : session.firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT
-        ? "<h1>" + T.summary.nearPerfectTitle + fallingSuffix + "</h1>"
-        : "<h1>" + T.summary.encouragingTitle + fallingSuffix + "</h1>";
+    // D2 (Marat 2026-08-28): a perfect round that is 2nd+ in a row gets its own
+    // title + series-bonus banner instead of the plain perfect title.
+    var titleHtml = session.perfect && session.perfectSeries >= 2
+      ? '<h1 class="summary-title-perfect">' + T.summary.perfectSeriesTitle(session.perfectSeries) + fallingSuffix + "</h1><p>" +
+        (session.perfectSeries >= 3 ? T.summary.perfectSeriesSub3 : T.summary.perfectSeriesSub) + "</p>" +
+        '<div class="station-banner">' + T.summary.seriesBonus(MathCore.Economy.perfectSeriesExtra(session.perfectSeries)) + "</div>"
+      : session.perfect
+        ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + fallingSuffix + "</h1><p>" + T.summary.perfectSub + "</p>"
+        : session.firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT
+          ? "<h1>" + T.summary.nearPerfectTitle + fallingSuffix + "</h1>"
+          : "<h1>" + T.summary.encouragingTitle + fallingSuffix + "</h1>";
     var learnedList = session.misses.length
       ? "<p>" + T.summary.learnedToday + ": " + session.misses.map(function (key) {
           var p = MathCore.Facts.parts(key); // P5: canonical key -> "a × b = product"
@@ -1648,7 +1690,11 @@
     bindAction("again", function () { switchMode(session.mode === "falling" ? "falling" : "typed"); }); // "עוד סבב" stays in the same game
     bindAction("done", function () { navigate("home"); });
     try {
-      if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
+      if (session.perfect && session.perfectSeries >= 3) {
+        fireworksShow(); setTimeout(fireworksShow, 900); confettiBurst(140); blip(SOUNDS.perfect);
+      } else if (session.perfect && session.perfectSeries >= 2) {
+        fireworksShow(); setTimeout(fireworksShow, 900); confettiBurst(100); blip(SOUNDS.perfect);
+      } else if (session.perfect) { fireworksShow(); confettiBurst(60); blip(SOUNDS.perfect); }
       else if ((session.stationsReached || []).length) { fireworksShow(); confettiBurst(40); blip(SOUNDS.unlock); }
       else if (session.unlocksEarned.length) { confettiBurst(30); blip(SOUNDS.unlock); }
       else { confettiBurst(12); }
@@ -2209,7 +2255,8 @@
             .map(function (sess) {
               var dateStr = new Date(sess.endedAt).toLocaleDateString("he-IL");
               var fallingMark = sess.mode === "falling" ? " 🎈" : "";
-              return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + fallingMark + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
+              var seriesMark = sess.perfectSeries >= 2 ? " 🔥" + bdi(sess.perfectSeries) : "";
+              return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + fallingMark + seriesMark + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
             })
             .join("")
         : '<p class="muted">' + T.parent.noSessionsYet + "</p>");

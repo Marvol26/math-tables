@@ -62,7 +62,7 @@ A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old g
 
 ## Falling numbers 🎈 (a second game mode)
 
-An optional mode: instead of typing, the expression is shown at the top and candidate answers fall from the top in bubbles — tap the correct one (or press keys 1–4/5/6 on a computer). A correct answer before the bubble lands doubles the coins; if the bubbles land first you can still tap calmly for regular coins — landing is never counted as a miss. A wrong tap shows the same dot-picture explanation as typed mode and the fact is re-asked at the end of that session. Off by default; parents enable it from the parent view → settings (an enable switch, fall time 3–20 seconds, and 4–6 bubbles). Coins and stickers still count; **this mode never affects "mastered", the journey map, or which facts carry over between sessions** — it trains recognition, not recall.
+An optional mode: instead of typing, the expression is shown at the top and candidate answers fall from the top in bubbles — tap the correct one (or press keys 1–4/5/6 on a computer). A correct answer before the bubble lands doubles the coins; if the bubbles land first you can still tap calmly for regular coins — landing is never counted as a miss. A wrong tap shows the same dot-picture explanation as typed mode and the fact is re-asked at the end of that session. Off by default; parents enable it from the parent view → settings (an enable switch, fall time 3–20 seconds, and 4–6 bubbles). Coins and stickers count, and since 2026-08-28 correct taps also count towards "mastered" and the journey map, exactly like typed answers; the only difference is that facts missed in this mode are not carried over into the next typed session.
 
 ## Install on iPad / iPhone
 

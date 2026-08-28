@@ -303,19 +303,100 @@ test("[WP1-gate test-gap] carryover overflow survives an intervening finish(): u
   assert.deepEqual(state.carryover, [missedKey, "2x2", "2x3", "2x4"]);
 });
 
-test("[WP1-gate test-gap] the perfect bonus is awarded only once per calendar day across two real perfect sessions driven through finish()", () => {
+// D2 (Marat 2026-08-28): the "first perfect of the day only" cap is gone —
+// every perfect round pays the perfect bonus, and a 2nd perfect in a row
+// (same day or not) also pays the series extra.
+test("two perfect sessions on the same day BOTH get the perfect bonus (the daily cap is gone)", () => {
   const state = freshState();
   const morning = new Date(2026, 7, 25, 9, 0, 0).getTime();
   const laterSameDay = new Date(2026, 7, 25, 20, 0, 0).getTime();
 
   const s1 = playPerfectSession(state, seededRng(14), morning);
   assert.equal(s1.perfect, true);
+  assert.equal(s1.perfectSeries, 1);
 
   const s2 = playPerfectSession(state, seededRng(15), laterSameDay);
   assert.equal(s2.perfect, true);
+  assert.equal(s2.perfectSeries, 2);
 
   const perfectEntries = state.economy.ledger.filter((e) => e.id.endsWith("_perfect"));
-  assert.equal(perfectEntries.length, 1);
+  assert.equal(perfectEntries.length, 2);
+  const seriesEntries = state.economy.ledger.filter((e) => e.id.endsWith("_series"));
+  assert.equal(seriesEntries.length, 1);
+  assert.equal(seriesEntries[0].amount, CONFIG.PERFECT_SERIES_EXTRA[1]);
+});
+
+test("perfect series: 3 perfect in a row, then a 9/10, then a perfect one — series and ledger track correctly", () => {
+  const state = freshState();
+  let t = 1000;
+
+  const s1 = playPerfectSession(state, seededRng(20), t); t += 100000;
+  const s2 = playPerfectSession(state, seededRng(21), t); t += 100000;
+  const s3 = playPerfectSession(state, seededRng(22), t); t += 100000;
+
+  // session 4: 9/10 (miss the first question on its first try)
+  SessionCore.start(state, seededRng(23), t);
+  const firstAsked4 = state.active.planned[0];
+  let missedOnce = false;
+  while (state.active.queue.length > 0 || state.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    t += 100;
+    if (current.asked === firstAsked4 && !current.retry && !missedOnce) {
+      missedOnce = true;
+      SessionCore.submit(state, -1, t, {});
+    } else {
+      SessionCore.submit(state, Facts.answer(current.asked), t, {});
+    }
+  }
+  const s4 = SessionCore.finish(state, t + 1);
+  t += 100000;
+
+  const s5 = playPerfectSession(state, seededRng(24), t);
+
+  assert.deepEqual([s1.perfectSeries, s2.perfectSeries, s3.perfectSeries, s4.perfectSeries, s5.perfectSeries], [1, 2, 3, 0, 1]);
+
+  function entryFor(session, suffix) {
+    return state.economy.ledger.find((e) => e.id === "l_" + session.id + "_" + suffix);
+  }
+  assert.equal(entryFor(s1, "perfect").amount, CONFIG.PERFECT_BONUS);
+  assert.equal(entryFor(s1, "series"), undefined);
+
+  assert.equal(entryFor(s2, "perfect").amount, CONFIG.PERFECT_BONUS);
+  assert.equal(entryFor(s2, "series").amount, 5);
+
+  assert.equal(entryFor(s3, "perfect").amount, CONFIG.PERFECT_BONUS);
+  assert.equal(entryFor(s3, "series").amount, 10);
+
+  assert.equal(entryFor(s4, "perfect"), undefined);
+  assert.equal(entryFor(s4, "near").amount, CONFIG.NEAR_PERFECT_BONUS);
+
+  assert.equal(entryFor(s5, "perfect").amount, CONFIG.PERFECT_BONUS);
+  assert.equal(entryFor(s5, "series"), undefined);
+});
+
+test("perfect series counts across game modes: a perfect falling session after a perfect typed one is series 2", () => {
+  const state = freshState();
+  state.settings.falling = { enabled: true, durationSec: 8, options: 4 };
+  let t = 1000;
+
+  const s1 = playPerfectSession(state, seededRng(25), t);
+  assert.equal(s1.perfectSeries, 1);
+  t += 100000;
+
+  SessionCore.start(state, seededRng(26), t, { mode: "falling" });
+  while (state.active.queue.length > 0 || state.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    t += 100;
+    SessionCore.submit(state, Facts.answer(current.asked), t, {});
+  }
+  const s2 = SessionCore.finish(state, t + 1);
+
+  assert.equal(s2.mode, "falling");
+  assert.equal(s2.perfect, true);
+  assert.equal(s2.perfectSeries, 2);
+  const seriesEntry = state.economy.ledger.find((e) => e.id === "l_" + s2.id + "_series");
+  assert.ok(seriesEntry);
+  assert.equal(seriesEntry.amount, 5);
 });
 
 // --- Closing review 2026-08-26: submit() exposes retry/withinLimit for the UI ---

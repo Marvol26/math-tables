@@ -51,6 +51,15 @@ test("validateImport accepts old sessions without a mode field", () => {
   assert.equal(result.ok, true);
 });
 
+test("validateImport: perfectSeries is optional, must be a non-negative number when present (review 2026-08-28 LOW-1)", () => {
+  const base = { planned: ["1x1"], firstTryCorrect: 1, coinsEarned: 1, masteredAfter: 0 };
+  assert.equal(Migrate.validateImport({ sessions: [Object.assign({}, base)] }).ok, true);
+  assert.equal(Migrate.validateImport({ sessions: [Object.assign({ perfectSeries: 0 }, base)] }).ok, true);
+  assert.equal(Migrate.validateImport({ sessions: [Object.assign({ perfectSeries: 3 }, base)] }).ok, true);
+  assert.equal(Migrate.validateImport({ sessions: [Object.assign({ perfectSeries: -1 }, base)] }).ok, false);
+  assert.equal(Migrate.validateImport({ sessions: [Object.assign({ perfectSeries: "2" }, base)] }).ok, false);
+});
+
 test("validateImport accepts a well-formed settings.falling", () => {
   const result = Migrate.validateImport({ settings: { falling: { enabled: true, durationSec: 10, options: 5 } } });
   assert.equal(result.ok, true);
@@ -66,8 +75,9 @@ test("validateImport rejects settings.falling with an out-of-range durationSec/o
 });
 
 // Fixture: one typed session, one falling session with identical shape except
-// mode/coins, proving the falling session moves coins but not accuracy/speed/mastery.
-test("Stats.trends: a falling session moves coins but not accuracy/avgMs/masteredCount", () => {
+// mode/coins, proving the falling session moves coins AND masteredCount but
+// not accuracy/avgMs (balloon mastery now counts, Marat 2026-08-28).
+test("Stats.trends: a falling session moves coins and masteredCount but not accuracy/avgMs", () => {
   const typedSession = {
     id: "t1",
     mode: "typed",
@@ -83,14 +93,14 @@ test("Stats.trends: a falling session moves coins but not accuracy/avgMs/mastere
     planned: ["3x3", "4x4"],
     firstTryCorrect: 2,
     coinsEarned: 99,
-    masteredAfter: 5,
+    masteredAfter: 7,
     attempts: [{ retry: false, interrupted: false, ms: 500 }, { retry: false, interrupted: false, ms: 500 }],
   };
   const state = { sessions: [typedSession, fallingSession] };
   const trends = Stats.trends(state, 30);
 
   assert.deepEqual(trends.accuracy, [0.5]); // only the typed session
-  assert.deepEqual(trends.masteredCount, [5]); // only the typed session
+  assert.deepEqual(trends.masteredCount, [5, 7]); // both sessions — mastery/map move for falling too
   assert.equal(trends.avgMs.length, 1);
   assert.equal(trends.coins.length, 2); // both sessions
   assert.deepEqual(trends.coins, [3, 99]);
@@ -124,7 +134,7 @@ test("Stats.trends: a long run of falling sessions does not starve the learning-
 
   const trends = Stats.trends(state, 30);
   assert.equal(trends.accuracy.length, 1, "the one typed session must still appear in the window");
-  assert.equal(trends.masteredCount.length, 1);
   assert.equal(trends.avgMs.length, 1);
   assert.equal(trends.coins.length, 30); // coins keeps the raw window (all-falling here)
+  assert.equal(trends.masteredCount.length, trends.coins.length, "masteredCount now windows over ALL sessions, like coins");
 });

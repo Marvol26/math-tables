@@ -23,7 +23,9 @@ A winding path with **10 stations, one per multiplication table**, in a learning
 `state.map = { reached: { "5": 1756...,  } }` (table number → time reached). Added by `migrate()` with a default `{}` — **schemaVersion stays 1** (additive, defaulting; old backups import fine). Export/import/undo/reset unchanged (reset clears it).
 
 ## 5. Out of scope (v1)
-Animal titles / XP levels; practice launched from a station; per-station rewards; falling.
+Animal titles / XP levels; practice launched from a station; per-station rewards.
+(Amended 2026-08-28, Marat D1: falling-mode sessions now move the map exactly
+like typed sessions — no longer out of scope.)
 
 ## 6. Tests (node)
 Table facts = 10 per table, shared facts counted; progress/reached/current computations; reached is monotone (mastery drop keeps it); path order; selector bonus applied only to the current table and never duplicates or breaks carryover-first; migrate defaults `map` and import validation accepts/rejects its shape.

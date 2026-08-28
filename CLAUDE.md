@@ -42,7 +42,8 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
    `retry:true`.
 5. **A session finalizes in exactly one storage write** (I2). Ledger ids are
    deterministic by session id (`l_<sid>_earn`, `_streak_<n>`, `_perfect`
-   xor `_near`); a session id already in `sessions` is never re-applied —
+   xor `_near`, plus `_series` alongside `_perfect` for a 2nd+ consecutive
+   perfect round); a session id already in `sessions` is never re-applied —
    `SessionCore.finish()` is idempotent by design, not by caller discipline.
 6. **Every `core.js` mutation call site must mutate inside `Storage.save()`'s
    own clone, never `App.storage.state` directly.** A failed save (stale or

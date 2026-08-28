@@ -131,6 +131,8 @@ Marat's affirmative yes, not something the executor writes to `~/brain`.
 - Marat's device pass for 0.6.0: open המפה שלי, tap a station, finish a session that completes a table (banner + fireworks).
 
 ## Falling numbers — design question for Marat (WP-F1 gate review, 2026-08-27)
+**Resolved 2026-08-28 (balloons v2):** the once-per-day perfect cap is gone — every perfect round pays +5 and consecutive perfect rounds pay a series extra (`CONFIG.PERFECT_SERIES_EXTRA`), across both modes. The text below is kept for history.
+
 The fresh Fable 5 reviewer flagged a real but non-bug interaction, not covered
 by FALLING-DESIGN F1–F10: the once-per-day perfect bonus (+5) and the daily
 streak counter are shared across typed and falling sessions. A falling

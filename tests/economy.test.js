@@ -40,17 +40,23 @@ test("mastered facts pay 1 (2 within the limit)", () => {
   assert.equal(Economy.coinsFor(state, key, { ok: true, retry: false, withinLimit: true }), 2);
 });
 
-test("perfect bonus is awarded only for the first perfect session of the calendar day (local time)", () => {
-  const state = emptyState();
-  const morning = new Date(2026, 7, 25, 9, 0, 0).getTime();
-  const evening = new Date(2026, 7, 25, 20, 0, 0).getTime();
-  const nextDay = new Date(2026, 7, 26, 9, 0, 0).getTime();
+test("perfectSeriesLength: consecutive perfect sessions ending with the most recent one", () => {
+  const p = { perfect: true };
+  const np = { perfect: false };
+  assert.equal(Economy.perfectSeriesLength([]), 0);
+  assert.equal(Economy.perfectSeriesLength([p, np]), 0);
+  assert.equal(Economy.perfectSeriesLength([np, p]), 1);
+  assert.equal(Economy.perfectSeriesLength([p, p, p]), 3);
+  assert.equal(Economy.perfectSeriesLength([p, np, p, p]), 2);
+  // old records without perfectSeries must work — only `.perfect` is read
+  assert.equal(Economy.perfectSeriesLength([{ perfect: true }, { perfect: true }]), 2);
+});
 
-  assert.equal(Economy.perfectBonusAmount(state.economy.ledger, morning), CONFIG.PERFECT_BONUS);
-  Economy.ledgerAppend(state, { id: "l_s1_perfect", t: morning, type: "earn", amount: CONFIG.PERFECT_BONUS, ref: "s1", note: "perfect" });
-
-  assert.equal(Economy.perfectBonusAmount(state.economy.ledger, evening), 0);
-  assert.equal(Economy.perfectBonusAmount(state.economy.ledger, nextDay), CONFIG.PERFECT_BONUS);
+test("perfectSeriesExtra: 1st perfect +0, 2nd +5, 3rd+ +10 (last entry repeats)", () => {
+  assert.equal(Economy.perfectSeriesExtra(1), 0);
+  assert.equal(Economy.perfectSeriesExtra(2), 5);
+  assert.equal(Economy.perfectSeriesExtra(3), 10);
+  assert.equal(Economy.perfectSeriesExtra(7), 10);
 });
 
 test("9/10 first-try-correct earns the near-perfect bonus; other counts do not", () => {
