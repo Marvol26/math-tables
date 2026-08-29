@@ -142,6 +142,15 @@ function buildWindow(opts) {
   window.requestAnimationFrame = function (cb) { return setTimeout(function () { cb(Date.now()); }, 0); };
   window.cancelAnimationFrame = function (id) { clearTimeout(id); };
 
+  // getComputedStyle — linkedom has none; app.js's balloonReactions() (a
+  // falling-mode submit's feedback) reads `.top` off it to freeze a bubble's
+  // mid-fall position. A real value never matters in a DOM with no CSS
+  // layout engine — only that it doesn't throw — so this returns the
+  // element's own inline style (or "0px"), enough for app.js's read-only use.
+  window.getComputedStyle = function (el) {
+    return { top: (el.style && el.style.top) || "0px" };
+  };
+
   // navigator.storage/.share — app.js already guards these as optional
   // (`if (navigator.storage && ...)`); giving them here just avoids the
   // guard's false branch everywhere so boot's persist() call resolves.

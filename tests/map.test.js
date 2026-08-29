@@ -7,6 +7,12 @@ function masterFact(state, key) {
   const fact = (state.facts[key] = state.facts[key] || Facts.emptyFact());
   fact.attempts += 3; fact.correct += 3; fact.lastSeen = 1;
   fact.recent = fact.recent.concat([1, 2, 3].map(() => ({ ok: true, ms: 2000, asked: key, t: 1, withinLimit: false, interrupted: false })));
+  // V2-DESIGN §8: non-square facts also need the mirror direction fast-correct.
+  const [a, b] = Facts.parts(key);
+  if (a !== b) {
+    fact.attempts += 1; fact.correct += 1;
+    fact.recent.push({ ok: true, ms: 2000, asked: b + "x" + a, t: 1, withinLimit: false, interrupted: false });
+  }
 }
 
 test("tableKeys: 10 facts per table, shared facts count for both tables", () => {
@@ -75,13 +81,20 @@ test("selector: current station's facts get the focus bonus, other tables do not
   assert.equal(focus - other, CONFIG.MAP_FOCUS_BONUS);
 });
 
-test("selector: carryover still comes first and there are no duplicates with the bonus in play", () => {
+// V2-DESIGN §8: the plan CAN now contain a canonical key twice (a mirror
+// pair), but never for a carryover key — carryover facts always have prior
+// attempts, so they are never eligible for pairing (only brand-new unseen
+// non-square facts are).
+test("selector: carryover still comes first and carryover keys are never duplicated by the mirror-pair bonus", () => {
   const state = Migrate.emptyState();
   state.carryover = ["6x7", "8x9"];
   const plan = Selector.plan(state, () => 0.42, 0);
   const canon = plan.map((asked) => { const p = Facts.parts(asked); return Facts.key(p[0], p[1]); });
-  assert.equal(new Set(canon).size, plan.length);
   assert.ok(canon.includes("6x7") && canon.includes("8x9"));
+  const counts = {};
+  canon.forEach((k) => { counts[k] = (counts[k] || 0) + 1; });
+  assert.equal(counts["6x7"], 1);
+  assert.equal(counts["8x9"], 1);
 });
 
 test("migrate defaults map; validateImport accepts a good map and rejects a bad one", () => {

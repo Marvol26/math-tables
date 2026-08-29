@@ -8,6 +8,10 @@
 
 מצב אופציונלי: במקום להקליד, מספר תרגיל מוצג למעלה ותשובות אפשריות "נופלות" מלמעלה בבועות — לוחצים על התשובה הנכונה (או מקישים 1–4/5/6 במחשב). תשובה נכונה לפני שהבועה נוחתת = מטבעות כפולים; אם הבועות נוחתות לפני שבוחרים, אפשר עדיין ללחוץ בנחת ולקבל מטבעות רגילים — אף תשובה לא נספרת כטעות. תשובה לא נכונה מציגה את אותו ציור-נקודות שמסביר את התרגיל, והוא נשאל שוב בסוף הסבב. המצב כבוי כברירת מחדל; ההורים מפעילים אותו במסך ההורים ← הגדרות (מתג הפעלה, זמן נפילה 3–20 שניות, ומספר בועות 4–6). מטבעות ומדבקות כן נספרים; **המצב הזה לא משפיע על "נלמד לגמרי", על מפת המסע, ועל התרגילים שחוזרים בין סבבים** — הוא אימון זיהוי, לא תרגול שינון.
 
+## תרגול בשני הכיוונים (V2-DESIGN §8)
+
+כל תרגיל חדש נשאל מיד גם הפוך (4×5 ואז 5×4); עובדה נחשבת "נלמדה לגמרי" רק כששני הכיוונים נענו נכון ומהר.
+
 ## התקנה על iPad / iPhone
 
 1. פתחו את הכתובת של המשחק ב**Safari** (לא בדפדפן אחר — רק Safari תומך בהוספה למסך הבית באייפד/אייפון).
@@ -63,6 +67,10 @@ A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old g
 ## Falling numbers 🎈 (a second game mode)
 
 An optional mode: instead of typing, the expression is shown at the top and candidate answers fall from the top in bubbles — tap the correct one (or press keys 1–4/5/6 on a computer). A correct answer before the bubble lands doubles the coins; if the bubbles land first you can still tap calmly for regular coins — landing is never counted as a miss. A wrong tap shows the same dot-picture explanation as typed mode and the fact is re-asked at the end of that session. Off by default; parents enable it from the parent view → settings (an enable switch, fall time 3–20 seconds, and 4–6 bubbles). Coins and stickers count, and since 2026-08-28 correct taps also count towards "mastered" and the journey map, exactly like typed answers; the only difference is that facts missed in this mode are not carried over into the next typed session.
+
+## Practising both directions (V2-DESIGN §8)
+
+Every brand-new fact is immediately asked in its mirror direction too (4×5, then 5×4), and a fact only counts as "mastered" once both directions have been answered correctly and quickly.
 
 ## Install on iPad / iPhone
 

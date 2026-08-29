@@ -5,9 +5,9 @@
 // deployable file, or tests/deploy-contract.test.js fails the suite.
 "use strict";
 
-var APP_VERSION = "0.15.0";
-var RELEASE = "0.15.0-cd9bca3785";
-var HASHED_ASSETS = ["core.js?v=5186c3ee07", "strings.js?v=19c1797be4", "app.js?v=31073d78b1", "styles.css?v=2663579693"];
+var APP_VERSION = "0.16.0";
+var RELEASE = "0.16.0-e0e5c8c639";
+var HASHED_ASSETS = ["core.js?v=409f0e12a2", "strings.js?v=41c2dc5ec6", "app.js?v=646f933096", "styles.css?v=2663579693"];
 var CACHE_NAME = "mathtrainer-" + RELEASE;
 // index.html/manifest/icons are precached unversioned but still busted on
 // every deploy because RELEASE (part of CACHE_NAME) folds in their bytes via

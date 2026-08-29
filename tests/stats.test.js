@@ -11,10 +11,11 @@ function fixtureState() {
     settings: { challengeOn: false, timeLimitSec: 10 },
   };
 
-  // "6x7" mastered
+  // "6x7" mastered (V2-DESIGN §8: also needs the mirror direction fast-correct)
   for (let i = 0; i < 3; i++) {
     Facts.updateFromAttempt(state, "6x7", { ok: true, ms: 3000, asked: "6x7", t: i, withinLimit: true, interrupted: false, retry: false });
   }
+  Facts.updateFromAttempt(state, "6x7", { ok: true, ms: 3000, asked: "7x6", t: 3, withinLimit: true, interrupted: false, retry: false });
   // "3x4" learning, weaker (one miss)
   Facts.updateFromAttempt(state, "3x4", { ok: true, ms: 5000, asked: "3x4", t: 1, withinLimit: false, interrupted: false, retry: false });
   Facts.updateFromAttempt(state, "3x4", { ok: false, ms: 6000, asked: "4x3", t: 2, withinLimit: false, interrupted: false, retry: false });
@@ -52,7 +53,7 @@ test("perFactTable returns all 55 facts with mastery/accuracy/medianMs derived f
   assert.equal(table.length, 55);
   const mastered = table.find((f) => f.key === "6x7");
   assert.equal(mastered.mastery, "mastered");
-  assert.equal(mastered.attempts, 3);
+  assert.equal(mastered.attempts, 4); // 3 forward + 1 mirror-direction (V2-DESIGN §8)
   const learning = table.find((f) => f.key === "3x4");
   assert.equal(learning.mastery, "learning");
   assert.equal(learning.accuracy, 0.5);
@@ -83,6 +84,36 @@ test("heatmap: mirrored cells (a,b) and (b,a) are identical", () => {
   assert.deepEqual(grid[5][6], grid[6][5]); // a=6,b=7 vs a=7,b=6 (0-indexed rows 5/6 -> values 6/7)
   assert.equal(grid[5][6].key, "6x7");
   assert.equal(grid[5][6].mastery, "mastered");
+  assert.equal(grid[5][6].mirror, "ok", "the fixture's 6x7 has a quick-mirror entry (V2-DESIGN §8 parent-view tri-state)");
+});
+
+// V2-DESIGN §8 amended 2026-08-29 (fix-verification escalation): the parent
+// view's tri-state ("ok"/"partial"/"no") is independent of mastery — mastery
+// now only needs Facts.bothDirectionsOk (this state's "partial" or better).
+test("heatmap/perFactTable: mirror tri-state — ok (quick), partial (both directions, not quick), no (one direction), and squares are always ok", () => {
+  const state = { facts: {}, economy: { ledger: [], unlocked: [], rewards: [], requests: [] }, sessions: [], carryover: [], settings: {} };
+  // "3x4": both directions correct, slow (7000ms, no quick pair) -> partial, but MASTERED (bothDirectionsOk).
+  Facts.updateFromAttempt(state, "3x4", { ok: true, ms: 7000, asked: "3x4", t: 1, withinLimit: false, interrupted: false, retry: false });
+  Facts.updateFromAttempt(state, "3x4", { ok: true, ms: 7000, asked: "3x4", t: 2, withinLimit: false, interrupted: false, retry: false });
+  Facts.updateFromAttempt(state, "3x4", { ok: true, ms: 7000, asked: "4x3", t: 3, withinLimit: false, interrupted: false, retry: false });
+  // "2x5": only one direction ever answered -> no.
+  Facts.updateFromAttempt(state, "2x5", { ok: true, ms: 3000, asked: "2x5", t: 1, withinLimit: false, interrupted: false, retry: false });
+
+  const grid = Stats.heatmap(state);
+  const cell34 = grid[2][3]; // a=3 (row idx 2), b=4 (col idx 3)
+  const cell25 = grid[1][4]; // a=2 (row idx 1), b=5 (col idx 4)
+  const cellSquare = grid[5][5]; // 6x6
+  assert.equal(cell34.key, "3x4");
+  assert.equal(cell34.mirror, "partial");
+  assert.equal(cell34.mastery, "mastered", "bothDirectionsOk (not mirrorOk) gates mastery");
+  assert.equal(cell25.key, "2x5");
+  assert.equal(cell25.mirror, "no");
+  assert.equal(cellSquare.mirror, "ok", "a square fact is always \"ok\" — only one direction exists");
+
+  const table = Stats.perFactTable(state);
+  assert.equal(table.find((f) => f.key === "3x4").mirror, "partial");
+  assert.equal(table.find((f) => f.key === "2x5").mirror, "no");
+  assert.equal(table.find((f) => f.key === "6x6").mirror, "ok");
 });
 
 test("weakest(): returns attempted, non-mastered facts ordered by weakness, mastered facts excluded", () => {

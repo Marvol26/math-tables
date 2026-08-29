@@ -80,6 +80,9 @@ window.MathText = (function () {
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },
       retryNowYouKnow: "עכשיו את יודעת! ✨",
       fallingLandedLabel: "נחתו! אפשר לבחור בנחת 🙂",
+      // V2-DESIGN §8 (mirror pairs): shown under the equation exactly when
+      // this question is the second of a mirror pair (current.mirror).
+      mirrorHint: "ועכשיו הפוך! אותה תשובה 😉",
       exitButton: "✕",
       exitBottom: "יציאה — ההתקדמות נשמרת",
       continueBtn: "הבנתי, ממשיכות ✓",
@@ -315,7 +318,13 @@ window.MathText = (function () {
       sessionLabel: function (i) { return "סבב " + i; },
       importSummary: function (sessions, coins, date) { return bdi(sessions) + " סבבים, " + bdi(coins) + " מטבעות, ייצוא מ-" + bdi(date); },
       masteryNames: { new: "חדש", learning: "בלמידה", mastered: "נלמד לגמרי" },
-      heatmapTooltip: function (a, b, masteryName) { return masteryName + ": " + a + "\u00d7" + b; },
+      // V2-DESIGN §8: heat-map tooltip gains this after the mastery name for
+      // non-square facts (mirrorSuffix null for squares, where mirror
+      // doesn't apply — see Stats.heatmap's mirrorOk).
+      mirrorState: { ok: "שני הכיוונים ✓ (מהר)", partial: "שני הכיוונים ✓", no: "כיוון אחד בלבד" },
+      heatmapTooltip: function (a, b, masteryName, mirrorSuffix) {
+        return masteryName + (mirrorSuffix ? " (" + mirrorSuffix + ")" : "") + ": " + a + "\u00d7" + b;
+      },
     },
 
     misc: {

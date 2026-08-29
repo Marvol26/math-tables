@@ -468,6 +468,36 @@ test("[MEDIUM-4] baseline: a clean minimal 2-fact session passes preflight", () 
   assert.deepEqual(preflightOf(minimalSession()), { ok: true });
 });
 
+// V2-DESIGN §8: `planned` may contain a canonical key TWICE (a mirror pair).
+// completedSessionEvidenceProblem's multiset check already compares full
+// `asked` strings by count, so this needs no code change — only proof.
+test("[§8] preflight accepts a planned canonical key twice (a mirror pair) with exactly two matching first attempts", () => {
+  const session = minimalSession({
+    planned: ["1x2", "2x1", "3x4"],
+    firstTryCorrect: 3,
+    attempts: [
+      { key: "1x2", asked: "1x2", ok: true, ms: 50, t: 1000100, retry: false, interrupted: false },
+      { key: "1x2", asked: "2x1", ok: true, ms: 50, t: 1000300, retry: false, interrupted: false },
+      { key: "3x4", asked: "3x4", ok: true, ms: 50, t: 1000900, retry: false, interrupted: false },
+    ],
+  });
+  assert.deepEqual(preflightOf(session), { ok: true });
+});
+
+test("[§8] preflight rejects a THIRD occurrence of a mirror-paired canonical key (multiset count mismatch)", () => {
+  const session = minimalSession({
+    planned: ["1x2", "2x1", "3x4"],
+    firstTryCorrect: 3,
+    attempts: [
+      { key: "1x2", asked: "1x2", ok: true, ms: 50, t: 1000100, retry: false, interrupted: false },
+      { key: "1x2", asked: "2x1", ok: true, ms: 50, t: 1000300, retry: false, interrupted: false },
+      { key: "1x2", asked: "1x2", ok: true, ms: 50, t: 1000500, retry: false, interrupted: false },
+      { key: "3x4", asked: "3x4", ok: true, ms: 50, t: 1000900, retry: false, interrupted: false },
+    ],
+  });
+  assert.deepEqual(preflightOf(session), { ok: false, reason: "malformed" });
+});
+
 test("[MEDIUM-4] duplicate first attempt (misses consistent) breaks the planned multiset", () => {
   const session = minimalSession({
     attempts: [
@@ -649,19 +679,37 @@ test("[NEW-ISSUE-A] attempts with t > endedAt (clock stepped back before finish)
 test("[MEDIUM-4 residual] a journal that completes a table's mastery does not reach the station until its session finishes", () => {
   const keys = [];
   for (let n = CONFIG.FACTS_MIN; n <= CONFIG.FACTS_MAX; n++) keys.push(Facts.key(1, n));
-  function attemptsAt(t0) {
-    return keys.map((k, i) => ({ key: k, asked: k, answer: Facts.answer(k), ok: true, ms: 500, retry: false, withinLimit: true, interrupted: false, mode: "typed", coins: 1, t: t0 + i * 100 }));
+  // V2-DESIGN §8: mastery also needs Facts.mirrorOk for non-square facts.
+  // s1/s2 ask every fact in its forward direction ("1xn"); the still-active
+  // journal (the "third fast correct" that flips mastery) asks the MIRROR
+  // direction ("nx1") for non-square facts — exactly what Selector's own
+  // chooseDirection would naturally do once the forward direction already
+  // has 2 fast-correct entries and the reverse has none (rule 2). This keeps
+  // the "3rd occurrence -> mastered" structure of the original fixture intact
+  // while also satisfying the new mirror requirement.
+  function askedFor(k, reversed) {
+    const [a, b] = Facts.parts(k);
+    return reversed && a !== b ? b + "x" + a : k;
+  }
+  function plannedFor(reversed) {
+    return keys.map((k) => askedFor(k, reversed));
+  }
+  function attemptsAt(t0, reversed) {
+    return keys.map((k, i) => {
+      const asked = askedFor(k, reversed);
+      return { key: k, asked, answer: Facts.answer(asked), ok: true, ms: 500, retry: false, withinLimit: true, interrupted: false, mode: "typed", coins: 1, t: t0 + i * 100 };
+    });
   }
   function completed(id, t0) {
-    return { id, startedAt: t0, endedAt: t0 + 2000, abandoned: false, mode: "typed", challengeOn: false, timeLimitSec: 10, planned: keys.slice(), attempts: attemptsAt(t0 + 10), firstTryCorrect: 10, totalMs: 5000, misses: [], coinsEarned: 10, perfect: true, perfectSeries: 1, masteredAfter: 0, unlocksEarned: [], stationsReached: [] };
+    return { id, startedAt: t0, endedAt: t0 + 2000, abandoned: false, mode: "typed", challengeOn: false, timeLimitSec: 10, planned: plannedFor(false), attempts: attemptsAt(t0 + 10, false), firstTryCorrect: 10, totalMs: 5000, misses: [], coinsEarned: 10, perfect: true, perfectSeries: 1, masteredAfter: 0, unlocksEarned: [], stationsReached: [] };
   }
   const state = freshState();
   state.sessions = [completed("s1", 1000), completed("s2", 10000)];
-  state.active = { id: "s3", startedAt: 20000, mode: "typed", settingsSnapshot: SessionCore.buildSnapshot(state, "typed"), planned: keys.slice(), queue: [], retryQueue: [], attempts: attemptsAt(20010), current: null, deferred: [] };
+  state.active = { id: "s3", startedAt: 20000, mode: "typed", settingsSnapshot: SessionCore.buildSnapshot(state, "typed"), planned: plannedFor(true), queue: [], retryQueue: [], attempts: attemptsAt(20010, true), current: null, deferred: [] };
   assert.deepEqual(Migrate.preflightEvidence(state), { ok: true });
   const result = Migrate.rebuildEvidence(state, 999999);
   assert.equal(result.ok, true);
-  assert.equal(MapCore.progress(state, 1), 10, "facts DO reflect the journal's attempts (third fast correct → mastered)");
+  assert.equal(MapCore.progress(state, 1), 10, "facts DO reflect the journal's attempts (third fast correct → mastered, mirror satisfied)");
   assert.deepEqual(state.map.reached, {}, "but no station is assigned from an unfinished journal");
-  assert.deepEqual(state.sessions[1].stationsReached, [], "and the last completed boundary (2 attempts per fact) did not qualify");
+  assert.deepEqual(state.sessions[1].stationsReached, [], "and the last completed boundary (2 attempts per fact, mirror not yet satisfied) did not qualify");
 });

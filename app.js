@@ -172,7 +172,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.15.0"; // set by tools/bump-version.js — do not hand-edit
+  var APP_VERSION = "0.16.0"; // set by tools/bump-version.js — do not hand-edit
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -622,6 +622,7 @@
         "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span><span>=</span>" +
         '<input id="answer-input" ' + (coarse ? 'readonly inputmode="none"' : 'inputmode="numeric"') + ' value="" />' +
         "</div>" +
+        (current.mirror ? '<div class="muted mirror-hint">' + T.question.mirrorHint + "</div>" : "") +
         "</div>" +
         '<div class="question-input">' +
         (coarse ? renderNumpad() : "") +
@@ -755,6 +756,7 @@
         '<div class="equation ltr" id="equation">' +
         "<span>" + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span>" +
         "</div>" +
+        (current.mirror ? '<div class="muted mirror-hint">' + T.question.mirrorHint + "</div>" : "") +
         "</div>" +
         '<div class="lanes" data-n="' + Number(options) + '">' + bubblesHtml + "</div>" +
         '<div class="muted falling-landed-label" id="falling-landed-label">' + (visuallyLanded ? T.question.fallingLandedLabel : "") + "</div>" +
@@ -1877,7 +1879,11 @@
             row
               .map(function (cell) {
                 var cp = MathCore.Facts.parts(cell.key);
-                return '<div title="' + T.parent.heatmapTooltip(cp[0], cp[1], T.parent.masteryNames[cell.mastery] || cell.mastery) + '" style="aspect-ratio:1;border-radius:4px;background:' + heatmapCellColor(cell) + '"></div>';
+                // V2-DESIGN §8: mirror-state suffix after the mastery name, non-square facts only
+                // (a square fact's `cell.mirror` is always "ok" — trivially, only one direction
+                // exists — but showing that to a parent for every square would be noise).
+                var mirrorSuffix = cp[0] === cp[1] ? null : T.parent.mirrorState[cell.mirror];
+                return '<div title="' + T.parent.heatmapTooltip(cp[0], cp[1], T.parent.masteryNames[cell.mastery] || cell.mastery, mirrorSuffix) + '" style="aspect-ratio:1;border-radius:4px;background:' + heatmapCellColor(cell) + '"></div>';
               })
               .join("")
           );

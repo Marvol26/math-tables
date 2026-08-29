@@ -61,12 +61,18 @@ test("a perfect falling session updates facts and pays coins; carryover stays un
   const session = playSession(state, seededRng(2), 1000, { mode: "falling" }, 0);
 
   // Balloon sessions now count for mastery, exactly like typed answers
-  // (Marat 2026-08-28): attempts incremented for every planned fact.
+  // (Marat 2026-08-28): attempts incremented once per planned OCCURRENCE of
+  // the fact — a V2-DESIGN §8 mirror pair plans the same canonical key
+  // twice, so that fact's attempts count is 2, not 1.
   assert.notDeepEqual(state.facts, factsBefore);
+  const occurrences = {};
   session.planned.forEach((asked) => {
     const key = Facts.key.apply(null, Facts.parts(asked)); // "asked" may be non-canonical direction (e.g. "6x1")
+    occurrences[key] = (occurrences[key] || 0) + 1;
+  });
+  Object.keys(occurrences).forEach((key) => {
     assert.ok(state.facts[key], "fact " + key + " must have been touched");
-    assert.equal(state.facts[key].attempts, 1);
+    assert.equal(state.facts[key].attempts, occurrences[key]);
   });
   // Carryover stays typed-only — falling never touches it (D1).
   assert.deepEqual(state.carryover, carryoverBefore);
@@ -103,16 +109,15 @@ test("falling: every attempt is tagged mode:'falling', typed sessions default to
 // A masteredFact helper builder so both the mastered-facts fixture and the
 // positive control below share one definition.
 function masteredFact(key) {
-  return {
-    attempts: 3,
-    correct: 3,
-    lastSeen: 500,
-    recent: [
-      { ok: true, ms: 100, asked: key, t: 100, withinLimit: false, interrupted: false },
-      { ok: true, ms: 100, asked: key, t: 200, withinLimit: false, interrupted: false },
-      { ok: true, ms: 100, asked: key, t: 300, withinLimit: false, interrupted: false },
-    ],
-  };
+  const [a, b] = Facts.parts(key);
+  const recent = [
+    { ok: true, ms: 100, asked: key, t: 100, withinLimit: false, interrupted: false },
+    { ok: true, ms: 100, asked: key, t: 200, withinLimit: false, interrupted: false },
+    { ok: true, ms: 100, asked: key, t: 300, withinLimit: false, interrupted: false },
+  ];
+  // V2-DESIGN §8: non-square facts also need the mirror direction fast-correct.
+  if (a !== b) recent.push({ ok: true, ms: 100, asked: b + "x" + a, t: 400, withinLimit: false, interrupted: false });
+  return { attempts: recent.length, correct: recent.length, lastSeen: 500, recent };
 }
 
 // WP-F8 gate review (fresh Fable 5, MEDIUM): the original version of this test
@@ -161,7 +166,7 @@ test("falling: positive control — the same 10/10-mastered fixture IS reached b
 // far below, one far above) for the balloon tap's own ms to become the
 // median and decide mastered vs. learning on its own.
 test("a balloon tap masters a fact under the normal rule", () => {
-  const key = "6x7";
+  const key = "6x6"; // square: no V2-DESIGN §8 mirror requirement, isolates the ms-threshold rule
   function seedStraddling(state) {
     Facts.updateFromAttempt(state, key, { ok: true, ms: 0, asked: key, t: 0, withinLimit: true, interrupted: false, retry: false });
     Facts.updateFromAttempt(state, key, { ok: true, ms: 999999, asked: key, t: 1, withinLimit: true, interrupted: false, retry: false });

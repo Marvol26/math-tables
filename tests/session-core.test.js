@@ -283,7 +283,11 @@ test("[WP1-gate M3] coins paid for the attempt that flips a fact to mastered mat
 test("[WP1-gate M3] a fact that demotes FROM mastered on this very attempt (slow but correct) pays the pre-attempt mastered value, not the post-attempt tier value", () => {
   const state = freshState();
   const key = "6x7";
-  // recent = [4000, 9000, 4000]: last-3 median = 4000ms -> mastered (pre-attempt), value shown = 1
+  // V2-DESIGN §8: seed the mirror direction first (earlier `t`, so it falls
+  // OUTSIDE the last-3 window below and leaves the median math untouched) so
+  // the fact can reach "mastered" at all.
+  Facts.updateFromAttempt(state, key, { ok: true, ms: 2000, asked: "7x6", t: -1, withinLimit: false, interrupted: false, retry: false });
+  // recent tail = [4000, 9000, 4000]: last-3 median = 4000ms -> mastered (pre-attempt), value shown = 1
   [4000, 9000, 4000].forEach((ms, i) => {
     Facts.updateFromAttempt(state, key, { ok: true, ms: ms, asked: key, t: i, withinLimit: false, interrupted: false, retry: false });
   });
@@ -597,4 +601,51 @@ test("[V2-DESIGN §3.3] perfect-series continuity holds across different session
   state.settings.sessionSize = 10;
   const s3 = playPerfectSession(state, seededRng(40), 3000); // back to size 10
   assert.equal(s3.perfectSeries, 3);
+});
+
+// --- V2-DESIGN §8 amended 2026-08-29, closing-review MEDIUM ---
+// `current.mirror` used to be adjacency-only (previous planned item shares
+// the canonical key). That is wrong in two cases: (a) a deferred/resumed
+// first-of-pair paints its neighbour (the true second direction) as if it
+// were the second of the pair, even though the first was never answered;
+// (b) a missed mirror question's own retry re-shows the flag. Both tests
+// fail against the pre-fix (adjacency-only) code.
+
+function mirrorPairJournal() {
+  return {
+    id: "s1",
+    startedAt: 1000,
+    mode: "typed",
+    settingsSnapshot: { challengeOn: false, timeLimitSec: 10 },
+    planned: ["6x7", "7x6"],
+    queue: ["6x7", "7x6"],
+    retryQueue: [],
+    attempts: [],
+    current: null,
+    deferred: [],
+  };
+}
+
+test("[§8 MEDIUM] a deferred first-of-pair does not make its neighbour paint with a false mirror flag", () => {
+  const state = { facts: {}, active: mirrorPairJournal() };
+  const c1 = SessionCore.paint(state, 1000);
+  assert.equal(c1.asked, "6x7");
+  assert.equal(c1.mirror, false);
+  SessionCore.deferCurrent(state); // relaunch mid-question — "6x7" never answered
+  const c2 = SessionCore.paint(state, 2000);
+  assert.equal(c2.asked, "7x6", "the deferred item moves to the end; its neighbour (the mirror direction) is asked next");
+  assert.equal(c2.mirror, false, "the true first-of-pair was never answered — no false mirror flag");
+});
+
+test("[§8 MEDIUM] a missed mirror question's own retry does not re-show the mirror flag", () => {
+  const state = { facts: {}, active: mirrorPairJournal() };
+  const c1 = SessionCore.paint(state, 1000);
+  SessionCore.submit(state, Facts.answer(c1.asked), 1100, {}); // correct: first of pair answered
+  const c2 = SessionCore.paint(state, 1200);
+  assert.equal(c2.asked, "7x6");
+  assert.equal(c2.mirror, true, "sanity: the second of the pair IS flagged once the first was actually answered");
+  SessionCore.submit(state, Facts.answer(c2.asked) + 1, 1300, {}); // miss it
+  const c3 = SessionCore.paint(state, 1400); // retry
+  assert.equal(c3.retry, true);
+  assert.equal(c3.mirror, false, "a retry of the mirror question must not re-show the hint");
 });

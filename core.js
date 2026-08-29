@@ -136,6 +136,20 @@
     NEAR_PERFECT_MISSES: 1,
     // Stars: perfect -> 3, >= this ratio of firstTryCorrect/planned.length -> 2, else 1.
     STARS_TWO_RATIO: 0.8,
+
+    // Mirror pairs with a speed check (V2-DESIGN §8, 2026-08-29, Marat:
+    // "option C + only a fast second answer counts"; amended 2026-08-29
+    // after closing-review HIGH-2 — a flat bar was unreachable for a ~10s
+    // typist, stalling mastery/the map entirely). A non-square fact counts
+    // as "understood both ways" (Facts.mirrorOk) when BOTH directions have
+    // a correct, non-interrupted, non-retry attempt, and at least one of
+    // them is a "quick mirror answer": ms <= MIRROR_FAST_MS (absolute), OR
+    // ms <= MIRROR_FAST_RATIO * the immediately preceding recent entry's ms
+    // for the SAME fact, when that preceding entry was itself a correct
+    // answer in the OTHER direction (she answered 4x5 in 9s and 5x4 in
+    // <= 5.4s -> she recognised it, even though neither crosses 4s alone).
+    MIRROR_FAST_MS: 4000,
+    MIRROR_FAST_RATIO: 0.6,
   };
 
   // Flattened sticker id list — existing callers (canonicalizeUnlocked,
@@ -191,6 +205,67 @@
       return state.facts[key] || Facts.emptyFact();
     },
 
+    // V2-DESIGN §8 (amended 2026-08-29, closing-review HIGH-2): does `fact`
+    // (undirected, canonical `key`) show BOTH directions understood — a
+    // correct, non-interrupted, non-retry entry in EACH direction, of which
+    // at least one is a "quick mirror answer" (see CONFIG.MIRROR_FAST_MS /
+    // MIRROR_FAST_RATIO's comment)? Squares (a===b) have only one direction
+    // and are trivially ok. Derived from fact.recent only (no new stored
+    // field) — rebuild-safe (a full replay reproduces the same recent
+    // entries in the same order) and import-safe (validateImport never
+    // touches this). Retries never reach fact.recent (Facts.updateFromAttempt
+    // throws on retry:true), so every entry here is already a first attempt.
+    // V2-DESIGN §8: does `fact` (undirected, canonical `key`) have a
+    // correct, non-interrupted, non-retry entry in EACH direction, at ANY
+    // speed? Squares (a===b) have only one direction and are trivially ok.
+    // This — not mirrorOk — is what mastery requires (amended 2026-08-29,
+    // fix-verification escalation: a simulated 5-11s typist never mastered
+    // under a quick-mirror requirement, since ~3s of every answer is typing;
+    // speed is already covered separately by the median <= MASTERY_MS_THRESHOLD
+    // rule below). Derived from fact.recent only (no new stored field).
+    bothDirectionsOk: function (fact, key) {
+      var p = Facts.parts(key);
+      if (p[0] === p[1]) return true;
+      if (!fact || !fact.recent) return false;
+      var dirA = p[0] + "x" + p[1];
+      var dirB = p[1] + "x" + p[0];
+      var hasA = fact.recent.some(function (r) { return r.asked === dirA && r.ok && !r.interrupted; });
+      var hasB = fact.recent.some(function (r) { return r.asked === dirB && r.ok && !r.interrupted; });
+      return hasA && hasB;
+    },
+
+    // V2-DESIGN §8 (amended 2026-08-29, closing-review HIGH-2): does `fact`
+    // (undirected, canonical `key`) show BOTH directions understood — a
+    // correct, non-interrupted, non-retry entry in EACH direction, of which
+    // at least one is a "quick mirror answer" (see CONFIG.MIRROR_FAST_MS /
+    // MIRROR_FAST_RATIO's comment)? Squares (a===b) have only one direction
+    // and are trivially ok. This is Marat's "she understood it" signal — it
+    // drives the PARENT VIEW only (Stats.heatmap/perFactTable's `mirror`
+    // field), never mastery (see bothDirectionsOk, which mastery uses;
+    // amended 2026-08-29 fix-verification escalation). Derived from
+    // fact.recent only (no new stored field) — rebuild-safe (a full replay
+    // reproduces the same recent entries in the same order) and import-safe
+    // (validateImport never touches this). Retries never reach fact.recent
+    // (Facts.updateFromAttempt throws on retry:true), so every entry here is
+    // already a first attempt.
+    mirrorOk: function (fact, key) {
+      var p = Facts.parts(key);
+      if (p[0] === p[1]) return true;
+      if (!fact || !fact.recent) return false;
+      var dirA = p[0] + "x" + p[1];
+      var dirB = p[1] + "x" + p[0];
+      if (!Facts.bothDirectionsOk(fact, key)) return false;
+      // "Quick" (see hasQuickMirrorEntry) can land on either direction.
+      return hasQuickMirrorEntry(fact, dirA, dirB, dirA) || hasQuickMirrorEntry(fact, dirA, dirB, dirB);
+    },
+
+    // Mastery = the pre-existing recency/speed rule AND bothDirectionsOk
+    // (V2-DESIGN §8, amends DESIGN §7; amended 2026-08-29 fix-verification
+    // escalation — NOT mirrorOk, which is the parent-view-only quick signal).
+    // `key` is not a parameter here — it is recovered from the most recent
+    // recent-entry's `asked` (always present once we reach this line, since
+    // recent.length >= MASTERY_WINDOW > 0) so every existing call site
+    // (`Facts.mastery(fact)`) keeps working unchanged.
     mastery: function (fact) {
       if (!fact || fact.attempts === 0) return "new";
       var recent = fact.recent || [];
@@ -206,8 +281,10 @@
         return x - y;
       });
       var median = times[Math.floor(times.length / 2)];
-      if (median <= CONFIG.MASTERY_MS_THRESHOLD) return "mastered";
-      return "learning";
+      if (median > CONFIG.MASTERY_MS_THRESHOLD) return "learning";
+      var key = canonicalOf(recent[recent.length - 1].asked);
+      if (key && !Facts.bothDirectionsOk(fact, key)) return "learning";
+      return "mastered";
     },
 
     value: function (state, key) {
@@ -483,17 +560,60 @@
   };
 
   var Selector = {
-    // Reuses the direction of the most recent miss for this fact, if any; else random.
+    // V2-DESIGN §8 order (amended 2026-08-29, fix-verification escalation:
+    // rule 2 uses plain correctness, matching mastery's bothDirectionsOk —
+    // the quick-mirror signal drives the parent view only, not selection):
+    // 1) the direction of the most recent miss; else 2) a direction with no
+    // correct entry yet; else 3) the direction with fewer correct answers;
+    // ties -> random. Squares have only one direction.
     chooseDirection: function (fact, key, rng) {
       var parts = Facts.parts(key);
       var a = parts[0];
       var b = parts[1];
+      if (a === b) return a + "x" + b;
+      var dirA = a + "x" + b;
+      var dirB = b + "x" + a;
+
+      // 1) the most recent miss NOT YET followed (later, in time order) by
+      //    a correct answer in that SAME direction (direction lock removed —
+      //    closing-review HIGH-1: the old version returned a stale miss
+      //    direction for up to RECENT_WINDOW attempts even after it had
+      //    since been answered correctly, making a fact un-masterable after
+      //    one miss under the mirror requirement).
       if (fact && fact.recent && fact.recent.length) {
+        var seenOk = {};
         for (var i = fact.recent.length - 1; i >= 0; i--) {
-          if (!fact.recent[i].ok) return fact.recent[i].asked;
+          var r = fact.recent[i];
+          if (r.ok) {
+            seenOk[r.asked] = true;
+          } else if (!seenOk[r.asked]) {
+            return r.asked;
+          } else {
+            break;
+          }
         }
       }
-      return rng() < 0.5 ? a + "x" + b : b + "x" + a;
+
+      // 2) a direction with no correct entry yet (plain correctness — the
+      //    same bothDirectionsOk concept mastery uses; the quick-mirror
+      //    signal is the parent view's business, not selection's).
+      function hasCorrect(dir) {
+        return !!(fact && fact.recent && fact.recent.some(function (r) { return r.asked === dir && r.ok && !r.interrupted; }));
+      }
+      var aHasCorrect = hasCorrect(dirA);
+      var bHasCorrect = hasCorrect(dirB);
+      if (aHasCorrect !== bHasCorrect) return aHasCorrect ? dirB : dirA;
+
+      // 3) the direction with fewer correct answers; ties -> random.
+      function correctCount(dir) {
+        if (!fact || !fact.recent) return 0;
+        return fact.recent.filter(function (r) { return r.asked === dir && r.ok; }).length;
+      }
+      var aCorrect = correctCount(dirA);
+      var bCorrect = correctCount(dirB);
+      if (aCorrect !== bCorrect) return aCorrect < bCorrect ? dirA : dirB;
+
+      return rng() < 0.5 ? dirA : dirB;
     },
 
     // Facts of the current map station's table get a mild priority (MAP-DESIGN §2).
@@ -515,23 +635,57 @@
 
     // Pure: does not mutate `state`. Returns an array of directional strings
     // (e.g. "7x2"), length up to `size` (V2-DESIGN §3.3; defaults to
-    // CONFIG.SESSION_SIZE_DEFAULT), no duplicate canonical keys. Which
-    // carryover keys were actually consumed is exposed as a non-enumerable
-    // `carryoverTaken` property on the returned array (SessionCore.start
-    // records it on `active`) so the array itself stays plain for any
-    // existing length/deepEqual comparison.
+    // CONFIG.SESSION_SIZE_DEFAULT). V2-DESIGN §8: a canonical key CAN appear
+    // twice — a brand-new (attempts === 0) non-square fact picked from the
+    // unseen pool (2a only; never carryover/learning/mastered/squares) is
+    // planned as a mirror PAIR (both directions, back to back, both counting
+    // toward `size`). Every item is tracked as a one- or two-item GROUP so
+    // the final shuffle can reorder groups without ever splitting a pair.
+    // Which carryover keys were actually consumed is exposed as a
+    // non-enumerable `carryoverTaken` property on the returned array
+    // (SessionCore.start records it on `active`) so the array itself stays
+    // plain for any existing length/deepEqual comparison.
     plan: function (state, rng, now, size) {
       size = typeof size === "number" && size > 0 ? size : CONFIG.SESSION_SIZE_DEFAULT;
       var used = new Set();
-      var planned = [];
+      var groups = [];
+      var count = 0;
       var carryoverTaken = [];
 
+      // Single-slot group: carryover, learning review, mastered review, and
+      // the last-resort random fill all go through here — never paired.
       function tryAdd(key) {
         if (used.has(key)) return false;
         used.add(key);
         var fact = Facts.getFact(state, key);
-        planned.push(Selector.chooseDirection(fact, key, rng));
+        groups.push([Selector.chooseDirection(fact, key, rng)]);
+        count += 1;
         return true;
+      }
+
+      // 2a only: a square fact (or one that no longer fits the remaining
+      // `budget`) is added as a normal single slot; a new non-square fact is
+      // added as BOTH directions, back to back, as one 2-slot group — never
+      // split across sessions (if only 1 slot is left for it, it is skipped
+      // here and stays "new" for a later session, or may be picked up as a
+      // single, unmirrored slot by step 4's random fill if nothing else can
+      // fill the session's last seat). Returns the number of slots consumed.
+      function tryAddUnseen(key, budget) {
+        if (used.has(key)) return 0;
+        var p = Facts.parts(key);
+        var isSquare = p[0] === p[1];
+        var need = isSquare ? 1 : 2;
+        if (need > budget) return 0;
+        used.add(key);
+        if (isSquare) {
+          groups.push([key]);
+        } else {
+          var dir1 = Selector.chooseDirection(Facts.getFact(state, key), key, rng);
+          var dir2 = dir1 === p[0] + "x" + p[1] ? p[1] + "x" + p[0] : p[0] + "x" + p[1];
+          groups.push([dir1, dir2]);
+        }
+        count += need;
+        return need;
       }
 
       // 1. Carryover FIFO first — overflow beyond `size` stays queued
@@ -539,11 +693,11 @@
       //    recomputes the next carryover from misses + unconsumed leftover,
       //    by key, using carryoverTaken below — V2-DESIGN §3.3).
       var carryover = state.carryover || [];
-      for (var c = 0; c < carryover.length && planned.length < size; c++) {
+      for (var c = 0; c < carryover.length && count < size; c++) {
         if (tryAdd(carryover[c])) carryoverTaken.push(carryover[c]);
       }
 
-      var remaining = size - planned.length;
+      var remaining = size - count;
       if (remaining > 0) {
         var allKeys = Facts.allKeys();
 
@@ -557,7 +711,8 @@
         }
         var nonMasteredSlots = remaining - reserveMastered;
 
-        // 2a. Unseen facts, sum ascending, random tie-break within equal sums.
+        // 2a. Unseen facts, sum ascending, random tie-break within equal
+        //     sums; each new non-square fact is planned as a mirror pair (§8).
         if (nonMasteredSlots > 0) {
           var unseen = allKeys.filter(function (k) {
             return !used.has(k) && Facts.getFact(state, k).attempts === 0;
@@ -583,7 +738,7 @@
           var others = unseenOrdered.filter(function (k) { return !Selector.isFocusFact(state, k); });
           unseenOrdered = focusFirst.concat(others);
           for (var u = 0; u < unseenOrdered.length && nonMasteredSlots > 0; u++) {
-            if (tryAdd(unseenOrdered[u])) nonMasteredSlots--;
+            nonMasteredSlots -= tryAddUnseen(unseenOrdered[u], nonMasteredSlots);
           }
         }
 
@@ -620,21 +775,24 @@
           }
         }
 
-        // 4. Random fill (only reached if the pools above could not fill the session).
-        if (planned.length < size) {
+        // 4. Random fill (only reached if the pools above could not fill the
+        //    session — e.g. a leftover single slot skipped by 2a's pairing).
+        if (count < size) {
           var leftoverKeys = fisherYatesShuffle(
             allKeys.filter(function (k) {
               return !used.has(k);
             }),
             rng
           );
-          for (var f = 0; f < leftoverKeys.length && planned.length < size; f++) {
+          for (var f = 0; f < leftoverKeys.length && count < size; f++) {
             tryAdd(leftoverKeys[f]);
           }
         }
       }
 
-      var result = fisherYatesShuffle(planned, rng);
+      var shuffledGroups = fisherYatesShuffle(groups, rng);
+      var result = [];
+      shuffledGroups.forEach(function (g) { result.push.apply(result, g); });
       Object.defineProperty(result, "carryoverTaken", { value: carryoverTaken, enumerable: false });
       return result;
     },
@@ -985,12 +1143,29 @@
       var key = Facts.key.apply(null, Facts.parts(asked));
       var wasDeferred = Array.isArray(active.deferred) && active.deferred.indexOf(asked) !== -1;
       if (wasDeferred) active.deferred.splice(active.deferred.indexOf(asked), 1);
+      // V2-DESIGN §8 (amended 2026-08-29, closing-review MEDIUM): this
+      // question is the SECOND of a mirror pair only when its immediate
+      // predecessor in the original `active.planned` order (a) shares its
+      // canonical key AND (b) has ALREADY been answered as a first attempt
+      // this session AND (c) this paint is not itself from the retry queue.
+      // Adjacency alone is not enough: a relaunch/park can defer the pair's
+      // FIRST item before it is ever answered, which would otherwise paint
+      // its (still-unanswered) neighbour as a false "second of the pair";
+      // and a missed mirror question's own retry must not re-show the hint.
+      var plannedIdx = active.planned.indexOf(asked);
+      var prevAsked = plannedIdx > 0 ? active.planned[plannedIdx - 1] : null;
+      var prevIsSameFact = prevAsked !== null && canonicalOf(prevAsked) === key;
+      var prevAnswered = prevIsSameFact && active.attempts.some(function (a) {
+        return a.asked === prevAsked && !a.retry;
+      });
+      var mirror = prevIsSameFact && prevAnswered && !fromRetry;
       active.current = {
         key: key,
         asked: asked,
         shownAt: now,
         interrupted: wasDeferred, // a previously seen question: no clock, base coins, not mastery-eligible
         retry: fromRetry,
+        mirror: mirror,
       };
       return active.current;
     },
@@ -1143,6 +1318,17 @@
   // --------------------------------------------------------------------
   // Stats — pure, first-attempt-only (DESIGN §7)
   // --------------------------------------------------------------------
+  // V2-DESIGN §8 (amended 2026-08-29, fix-verification escalation): the
+  // parent-view tri-state for a fact's mirror understanding — "ok" (quick
+  // signal, Facts.mirrorOk), "partial" (both directions correct at any
+  // speed, Facts.bothDirectionsOk, but not quick), or "no" (neither).
+  // Squares are always "ok" (only one direction exists).
+  function mirrorTriState(fact, key) {
+    if (Facts.mirrorOk(fact, key)) return "ok";
+    if (Facts.bothDirectionsOk(fact, key)) return "partial";
+    return "no";
+  }
+
   function dayStart(t) {
     var d = new Date(t);
     d.setHours(0, 0, 0, 0);
@@ -1174,6 +1360,7 @@
           medianMs: median,
           lastSeen: fact.lastSeen,
           mastery: Facts.mastery(fact),
+          mirror: mirrorTriState(fact, key),
         };
       });
     },
@@ -1246,6 +1433,8 @@
             attempts: fact.attempts,
             accuracy: fact.attempts ? fact.correct / fact.attempts : null,
             mastery: Facts.mastery(fact),
+            // V2-DESIGN §8 parent view tri-state (squares are always "ok").
+            mirror: mirrorTriState(fact, key),
           });
         }
         grid.push(row);
@@ -1312,6 +1501,30 @@
   }
 
   var DIRECTIONAL_RE = /^\d+x\d+$/;
+
+  // Shared by Facts.mirrorOk and Selector.chooseDirection (V2-DESIGN §8,
+  // amended 2026-08-29, closing-review HIGH-2): true when `fact.recent` holds
+  // a correct, non-interrupted entry asked in `dir` that is a "quick mirror
+  // answer" — beats CONFIG.MIRROR_FAST_MS outright, or beats
+  // CONFIG.MIRROR_FAST_RATIO of the immediately preceding recent entry's ms
+  // for the SAME fact, when that preceding entry was itself a correct,
+  // non-interrupted answer in the OTHER of the two directions (a miss or an
+  // interrupted attempt right before this one never enables the ratio path).
+  function hasQuickMirrorEntry(fact, dirA, dirB, dir) {
+    if (!fact || !fact.recent) return false;
+    var recent = fact.recent;
+    for (var i = 0; i < recent.length; i++) {
+      var r = recent[i];
+      if (r.asked !== dir || !r.ok || r.interrupted) continue;
+      if (r.ms <= CONFIG.MIRROR_FAST_MS) return true;
+      var prev = i > 0 ? recent[i - 1] : null;
+      if (!prev || !prev.ok || prev.interrupted) continue;
+      if (prev.asked !== dirA && prev.asked !== dirB) continue;
+      if (prev.asked === r.asked) continue;
+      if (r.ms <= CONFIG.MIRROR_FAST_RATIO * prev.ms) return true;
+    }
+    return false;
+  }
 
   // "7x2" -> "2x7" (the undirected fact key); null if malformed.
   function canonicalOf(asked) {

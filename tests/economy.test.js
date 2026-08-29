@@ -31,7 +31,7 @@ test("within-limit doubles the base value", () => {
 
 test("mastered facts pay 1 (2 within the limit)", () => {
   const state = emptyState();
-  const key = "6x7";
+  const key = "6x6"; // square (same tier as 6x7): no V2-DESIGN §8 mirror requirement
   for (let i = 0; i < 3; i++) {
     Facts.updateFromAttempt(state, key, { ok: true, ms: 4000, asked: key, t: i, withinLimit: true, interrupted: false, retry: false });
   }

@@ -15,6 +15,7 @@ const {
   fireClick,
   completeParentSetup,
   playSessionToSummary,
+  answerCurrentQuestionCorrectly,
 } = require("./harness.js");
 
 test("[S3-4] first-run setup: happy path reaches Home, and a failed save keeps the parent on the setup screen with an error", async () => {
@@ -413,4 +414,106 @@ test("[S3-F U8] after a wrong first attempt, the question screen shows a .dot.re
 
   assert.equal(currentScreen(window), "question");
   assert.equal(d.querySelectorAll(".dot.retry").length, 1, "the missed fact must show exactly one retry dot on the next question");
+});
+
+// V2-DESIGN §8 (mirror pairs): overwrite the active session's journal to a
+// known, fixed non-square mirror pair ("6x7"/"7x6") with NO current question
+// (so SessionCore.paint has nothing to defer), then force a fresh entry into
+// the question screen (a hash round-trip through another screen — the same
+// technique the existing falling-options test uses to force a Home
+// re-render) so it paints "6x7" fresh. This is test-only state surgery
+// (production code never bypasses SessionCore.start/paint/submit); the
+// mirror flag on the SECOND question is computed by the real
+// SessionCore.paint from the real `active.planned` adjacency.
+async function forceFreshMirrorPair(window) {
+  const state = window.App.storage.state;
+  state.active.planned = ["6x7", "7x6"];
+  state.active.queue = ["6x7", "7x6"];
+  state.active.retryQueue = [];
+  state.active.attempts = [];
+  state.active.deferred = [];
+  state.active.current = null;
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=question";
+  await flush(10);
+}
+
+test("[§8] the second question of a forced mirror pair shows the mirror hint on the typed screen; the first does not", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  window.MathCore.CONFIG.WRONG_ANSWER_DISPLAY_MS = 0;
+  await completeParentSetup(window);
+  fireClick(window.document.querySelector('[data-action="play"]'));
+  await flush(10);
+  assert.equal(currentScreen(window), "question");
+
+  await forceFreshMirrorPair(window);
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.App.storage.state.active.current.asked, "6x7");
+  assert.equal(window.App.storage.state.active.current.mirror, false, "the first of the pair must not carry the mirror flag");
+  assert.equal(window.document.querySelector(".mirror-hint"), null, "no hint on the first question of the pair");
+
+  const answered = await answerCurrentQuestionCorrectly(window);
+  assert.ok(answered);
+  await flush(15);
+
+  assert.equal(currentScreen(window), "question");
+  const current2 = window.App.storage.state.active.current;
+  assert.equal(current2.asked, "7x6");
+  assert.equal(current2.mirror, true, "SessionCore.paint must flag the second of the pair");
+  const hintEl = window.document.querySelector(".mirror-hint");
+  assert.ok(hintEl, "the mirror hint must render under the equation for the second question of a pair");
+  assert.equal(hintEl.textContent, window.MathText.T.question.mirrorHint);
+});
+
+test("[§8] the second question of a forced mirror pair shows the mirror hint on the falling screen", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  window.MathCore.CONFIG.WRONG_ANSWER_DISPLAY_MS = 0;
+  await completeParentSetup(window);
+  await window.App.storage.save(function (s) {
+    s.settings.falling = { enabled: true, durationSec: 8, options: 4 };
+  }, Date.now());
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=home";
+  await flush(5);
+  fireClick(window.document.querySelector('[data-action="play-falling"]'));
+  await flush(10);
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-falling"), "1");
+
+  await forceFreshMirrorPair(window);
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-falling"), "1");
+  assert.equal(window.App.storage.state.active.current.asked, "6x7");
+  assert.equal(window.App.storage.state.active.current.mirror, false, "the first of the pair must not carry the mirror flag");
+  assert.equal(window.document.querySelector(".mirror-hint"), null, "no hint on the first question of the pair");
+
+  const bubble = window.document.querySelector('.bubble[data-value="42"]'); // 6x7 = 42
+  assert.ok(bubble, "a bubble for the correct answer (6x7=42) must be present");
+  fireClick(bubble);
+  await flush(15);
+
+  assert.equal(currentScreen(window), "question");
+  const current2 = window.App.storage.state.active.current;
+  assert.equal(current2.asked, "7x6");
+  assert.equal(current2.mirror, true, "SessionCore.paint must flag the second of the pair");
+  const hintEl = window.document.querySelector(".mirror-hint");
+  assert.ok(hintEl, "the mirror hint must render under the equation for the second question of a pair");
+  assert.equal(hintEl.textContent, window.MathText.T.question.mirrorHint);
+});
+
+// V2-DESIGN §8 amended 2026-08-29 (fix-verification escalation): T.parent.mirrorState
+// gained a third "partial" state, and "ok" changed to include "(מהר)". No DOM
+// drive needed — just the loaded strings + Stats' tri-state, which the
+// tooltip in app.js's parent-render composes verbatim.
+test("[§8 fix-verification] T.parent.mirrorState has the exact three verbatim strings and heatmapTooltip composes them correctly", async () => {
+  const window = await bootApp();
+  const T = window.MathText.T;
+  assert.equal(T.parent.mirrorState.ok, "שני הכיוונים ✓ (מהר)");
+  assert.equal(T.parent.mirrorState.partial, "שני הכיוונים ✓");
+  assert.equal(T.parent.mirrorState.no, "כיוון אחד בלבד");
+  assert.equal(T.parent.heatmapTooltip(3, 4, T.parent.masteryNames.mastered, T.parent.mirrorState.partial), "נלמד לגמרי (שני הכיוונים ✓): 3×4");
+  assert.equal(T.parent.heatmapTooltip(3, 4, T.parent.masteryNames.learning, T.parent.mirrorState.no), "בלמידה (כיוון אחד בלבד): 3×4");
+  assert.equal(T.parent.heatmapTooltip(6, 6, T.parent.masteryNames.mastered, null), "נלמד לגמרי: 6×6", "no mirror suffix for a square fact");
 });
