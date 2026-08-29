@@ -106,6 +106,7 @@ Warm cream `#FFF8F0`, white cards r=24, primary `#4F7CFF`, correct `#3CC97A`, wr
 - Manifest + `apple-touch-icon` + `apple-mobile-web-app-capable`; `sw.js` caches the app files under a `VERSION` cache, deletes old caches on activate. **Update toast ("יש גרסה חדשה — רענני") only on the home screen, never mid-session** (R1 #1).
 - Repo `Marvol26/math-tables` (public, guessable URL; no personal data in the files). **Creating/pushing the repo is outward-facing → gated.**
 - iOS storage: plain Safari tabs may be evicted after ~7 days of non-use (ITP); Home-Screen apps are exempt. Uninstalling the Home-Screen app **deletes all progress** — stated in README and in the first-run banner. Mitigations: install banner, `storage.persist()`, export prompts (home banner + after redemption). Verify eviction behaviour empirically in the build checklist.
+- **Scope, package 4 (2026-08-29):** a third optional game mode, "בונים קיר" (build the wall — `docs/WALL-DESIGN.md`), joined falling numbers as an alternate way to answer; both ship **disabled by default** behind a parent settings toggle, so a fresh install is unchanged until a parent opts in.
 
 ## 12. Alternatives rejected
 - `file://` + Mac launcher: iOS runs no JS from local files. Kept only the dual-write idea.

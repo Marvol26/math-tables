@@ -15,19 +15,33 @@ function mulberry32(seed) {
   };
 }
 
-function simulate(profile, seed, maxSessions, sessionSize) {
+// `mode` (docs/WALL-DESIGN.md §1: "the simulator's wall profile must match its
+// falling numbers") defaults to "typed"; "falling"/"wall" seed the matching
+// settings block and start every session in that mode. The correct/wrong/
+// speed loop below is mode-agnostic on purpose — coinsFor/mastery only ever
+// look at ok/withinLimit, never at HOW the answer was produced (typed digits
+// vs. a recognition tap), so the same profile numbers are a fair stand-in for
+// "an average child's balloon-tap or wall-tap accuracy and reaction time".
+function simulate(profile, seed, maxSessions, sessionSize, mode) {
+  mode = mode || "typed";
   const rng = mulberry32(seed);
   const state = {
     facts: {},
     economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
     sessions: [],
     carryover: [],
-    settings: { challengeOn: profile.challengeOn, timeLimitSec: 10, sessionSize: sessionSize },
+    settings: {
+      challengeOn: profile.challengeOn,
+      timeLimitSec: 10,
+      sessionSize: sessionSize,
+      falling: { enabled: true, durationSec: CONFIG.FALLING.DEFAULT_DURATION_SEC, options: CONFIG.FALLING.DEFAULT_OPTIONS },
+      wall: { enabled: true, durationSec: CONFIG.WALL.DEFAULT_DURATION_SEC, options: CONFIG.WALL.DEFAULT_OPTIONS },
+    },
   };
   let now = 0;
   for (let s = 0; s < maxSessions; s++) {
     now += 24 * 60 * 60 * 1000; // one session per day
-    SessionCore.start(state, rng, now);
+    SessionCore.start(state, rng, now, { mode: mode });
     let t = now;
     while (state.active.queue.length > 0 || state.active.retryQueue.length > 0) {
       const current = SessionCore.paint(state, t);
@@ -64,4 +78,13 @@ console.log("session size: " + sessionSize + " (MAX_SESSIONS budget: " + MAX_SES
 Object.keys(profiles).forEach(function (name) {
   const result = simulate(profiles[name], name.length * 7919 + 13, MAX_SESSIONS, sessionSize);
   console.log(name + ": " + (result === null ? "did not complete within " + MAX_SESSIONS + " sessions" : result + " sessions to complete the collection"));
+});
+
+// docs/WALL-DESIGN.md §1: "Economy identical to balloons (the simulator's
+// wall profile must match its falling numbers)" — run the SAME "average"
+// profile in both recognition-tap modes (same seed, so any difference is
+// purely mode logic, not RNG draw order) and report both.
+["falling", "wall"].forEach(function (mode) {
+  const result = simulate(profiles.average, "average".length * 7919 + 13, MAX_SESSIONS, sessionSize, mode);
+  console.log(mode + " (average profile): " + (result === null ? "did not complete within " + MAX_SESSIONS + " sessions" : result + " sessions to complete the collection"));
 });

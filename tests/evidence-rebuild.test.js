@@ -78,8 +78,9 @@ function buildFixture() {
 
   assert.equal(state.active.mode, "typed");
   assert.equal(state.active.attempts.length, 5);
-  assert.equal(state.parked.mode, "falling");
-  assert.equal(state.parked.attempts.length, 4);
+  assert.equal(state.parkedSessions.length, 1);
+  assert.equal(state.parkedSessions[0].mode, "falling");
+  assert.equal(state.parkedSessions[0].attempts.length, 4);
   assert.equal(state.sessions.length, 29);
   return state;
 }

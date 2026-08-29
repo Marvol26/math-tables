@@ -517,3 +517,91 @@ test("[§8 fix-verification] T.parent.mirrorState has the exact three verbatim s
   assert.equal(T.parent.heatmapTooltip(3, 4, T.parent.masteryNames.learning, T.parent.mirrorState.no), "בלמידה (כיוון אחד בלבד): 3×4");
   assert.equal(T.parent.heatmapTooltip(6, 6, T.parent.masteryNames.mastered, null), "נלמד לגמרי: 6×6", "no mirror suffix for a square fact");
 });
+
+// docs/WALL-DESIGN.md §1 (package 4 closing review, 2026-08-29, finding F6):
+// UI harness coverage for the wall screen — mirrors the equivalent falling
+// tests above.
+test("[4-F] wall mode renders the well + one option row per configured N, and the screen carries data-wall=1", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  await completeParentSetup(window);
+
+  await window.App.storage.save(function (s) {
+    s.settings.wall = { enabled: true, durationSec: 10, options: 5 };
+  }, Date.now());
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=home";
+  await flush(5);
+
+  fireClick(window.document.querySelector('[data-action="play-wall"]'));
+  await flush(10);
+
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-wall"), "1");
+  const well = window.document.querySelector(".wall-well");
+  assert.ok(well, ".wall-well must be present in wall mode");
+  assert.ok(well.querySelector("#wall-piece"), "the falling piece div must be present");
+  const lanes = window.document.querySelector(".wall-options.lanes");
+  assert.ok(lanes, "the static option row (.wall-options.lanes) must be present");
+  assert.equal(lanes.getAttribute("data-n"), "5");
+  assert.equal(window.document.querySelectorAll(".wall-options .bubble").length, 5);
+  assert.ok(window.document.querySelector(".wall-controls"), "the ◀ ▶ controls must be present");
+});
+
+test("[4-F] the second question of a forced mirror pair shows the mirror hint on the wall screen", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  window.MathCore.CONFIG.WRONG_ANSWER_DISPLAY_MS = 0;
+  await completeParentSetup(window);
+  await window.App.storage.save(function (s) {
+    s.settings.wall = { enabled: true, durationSec: 10, options: 4 };
+  }, Date.now());
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=home";
+  await flush(5);
+  fireClick(window.document.querySelector('[data-action="play-wall"]'));
+  await flush(10);
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-wall"), "1");
+
+  await forceFreshMirrorPair(window);
+  assert.equal(currentScreen(window), "question");
+  assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-wall"), "1");
+  assert.equal(window.App.storage.state.active.current.asked, "6x7");
+  assert.equal(window.App.storage.state.active.current.mirror, false, "the first of the pair must not carry the mirror flag");
+  assert.equal(window.document.querySelector(".mirror-hint"), null, "no hint on the first question of the pair");
+
+  const bubble = window.document.querySelector('.wall-options .bubble[data-value="42"]'); // 6x7 = 42
+  assert.ok(bubble, "a bubble for the correct answer (6x7=42) must be present");
+  fireClick(bubble);
+  await flush(15);
+
+  assert.equal(currentScreen(window), "question");
+  const current2 = window.App.storage.state.active.current;
+  assert.equal(current2.asked, "7x6");
+  assert.equal(current2.mirror, true, "SessionCore.paint must flag the second of the pair");
+  const hintEl = window.document.querySelector(".mirror-hint");
+  assert.ok(hintEl, "the mirror hint must render under the equation for the second question of a pair");
+  assert.equal(hintEl.textContent, window.MathText.T.question.mirrorHint);
+});
+
+test("[4-F] Home shows three mode buttons when both falling and wall are enabled", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  await completeParentSetup(window);
+  await window.App.storage.save(function (s) {
+    s.settings.falling = { enabled: true, durationSec: 8, options: 4 };
+    s.settings.wall = { enabled: true, durationSec: 10, options: 4 };
+  }, Date.now());
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=home";
+  await flush(5);
+
+  assert.equal(currentScreen(window), "home");
+  assert.ok(window.document.querySelector('[data-action="play-falling"]'), "falling button must render");
+  assert.ok(window.document.querySelector('[data-action="play-wall"]'), "wall button must render");
+  assert.ok(window.document.querySelector('[data-action="play"]'), "typed button must render");
+  assert.equal(window.document.querySelector('[data-action="play-falling"]').textContent, window.MathText.T.home.fallingBtn);
+  assert.equal(window.document.querySelector('[data-action="play-wall"]').textContent, window.MathText.T.home.wallBtn);
+  assert.equal(window.document.querySelector('[data-action="play"]').textContent, window.MathText.T.home.startCta);
+});

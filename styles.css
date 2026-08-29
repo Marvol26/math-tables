@@ -168,13 +168,15 @@
      flex flow into its own fixed `bottom` offset (like .audience already has), so both sit at a
      constant, content-height-independent distance from the screen edge, with a guaranteed gap
      between them at every viewport (re-verified — see status log). */
-  [data-screen="question"][data-falling="1"] [data-action="exit-bottom"] {
+  [data-screen="question"][data-falling="1"] [data-action="exit-bottom"],
+  [data-screen="question"][data-wall="1"] [data-action="exit-bottom"] {
     /* left/right:0 + width:fit-content + margin:auto (not left:50%+translateX, which
        constrains shrink-to-fit width to the space right of the 50% mark and wrapped
        this button's text — caught by re-verification) centres it without that trap. */
     position: absolute; left: 0; right: 0; width: fit-content; margin: 0 auto; bottom: 0.6rem; z-index: 4;
   }
   .screen[data-falling="1"] .audience { bottom: 3.8rem; }
+  .screen[data-wall="1"] .audience { bottom: 3.8rem; } /* wall: same absolute exit button (review 2026-08-29 LOW) */
   .audience { position: absolute; bottom: 2.6rem; left: 0; right: 0; display: flex; justify-content: center; gap: 0.5rem; pointer-events: none; z-index: 2; }
   .audience-member { font-size: 1.6rem; display: inline-block; animation: audience-bob 2.4s ease-in-out infinite; animation-delay: calc(var(--ai, 0) * 0.15s); }
   .audience-member.golden { filter: drop-shadow(0 0 4px rgba(255,201,60,0.9)); }
@@ -241,7 +243,10 @@
      animation — centred with left/right/margin instead, for all three rules. */
   [data-screen="question"][data-falling="1"] .question-info > .fast-badge,
   [data-screen="question"][data-falling="1"] .question-info > .wrong-helper,
-  [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
+  [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label),
+  [data-screen="question"][data-wall="1"] .question-info > .fast-badge,
+  [data-screen="question"][data-wall="1"] .question-info > .wrong-helper,
+  [data-screen="question"][data-wall="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
     position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; margin: 0 auto;
     z-index: 6; width: fit-content; max-width: min(92vw, 520px);
     background: var(--card-bg); border-radius: 20px; padding: 0.8rem 1rem;
@@ -329,6 +334,7 @@
   @media (max-height: 420px) and (min-width: 480px) {
     [data-screen="question"][data-falling="1"] { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; padding: 0.4rem 0.8rem 3.6rem; }
     [data-screen="question"][data-falling="1"] [data-action="exit-bottom"] { position: static; width: 100%; } /* landscape: back in flow under the label (review 2026-08-29) */
+    [data-screen="question"][data-wall="1"] [data-action="exit-bottom"] { position: static; width: 100%; }
     [data-screen="question"][data-falling="1"] .audience { display: none; } /* landscape: no room below the lanes for the decorative strip */
     [data-screen="question"][data-falling="1"] .question-info { margin-top: 0; }
     [data-screen="question"][data-falling="1"] .lanes { height: calc(100dvh - 1.2rem); min-height: 0; flex: 0 0 auto; width: min(440px, 58vw); }
@@ -344,9 +350,113 @@
        No ancestor carries a transform/filter, so `fixed` escapes .screen. */
     [data-screen="question"][data-falling="1"] .question-info > .fast-badge,
     [data-screen="question"][data-falling="1"] .question-info > .wrong-helper,
-    [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
+    [data-screen="question"][data-falling="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label),
+    [data-screen="question"][data-wall="1"] .question-info > .fast-badge,
+    [data-screen="question"][data-wall="1"] .question-info > .wrong-helper,
+    [data-screen="question"][data-wall="1"] .question-info > .muted:not(.map-status):not(.dots-text):not(.interrupted-label) {
       position: fixed; top: 0.4rem; max-height: calc(100dvh - 0.8rem);
     }
+  }
+  /* בונים קיר "build the wall" mode (docs/WALL-DESIGN.md, package 4). The
+     well is a CSS grid-sized box (cell min(7vw,26px), per §1) that stays
+     forced LTR like .lanes so column 0 is always visually leftmost
+     regardless of the page's RTL direction — tap-a-column/◀▶/arrow-key
+     semantics all assume that. */
+  [data-screen="question"][data-wall="1"] {
+    /* F2 (closing review 2026-08-29): the base `.screen` rule centres its
+       flex children (`justify-content: center`) and, with `overflow-y:auto`
+       + `min-height:100dvh`, Chrome grows the BOX itself (not just the
+       scrollable area) to contain an absolutely-positioned descendant that
+       overflows past the fold — so inserting `.wrong-helper`/`.fast-badge`
+       silently re-centred (and visibly shifted) every sibling, including the
+       well, by up to ~250px. `justify-content: flex-start` anchors the
+       group to the top exactly like the falling screen's own equivalent
+       rule, immune to that growth. */
+    justify-content: flex-start;
+    padding-bottom: 3.6rem; gap: 0.6rem;
+    /* F4 (closing review 2026-08-29): the cell was capped by WIDTH only
+       (min(7vw,26px)), so at a short viewport (320x568/375x667 portrait) a
+       14-row well pushed the option row below the fold. Cap it by available
+       HEIGHT too: 560px is the rest of the screen's fixed-height chrome
+       (question-info + controls + option row + landed label + exit button +
+       6 gaps + top/bottom padding), measured empirically at 320x568/375x667
+       (two earlier attempts (330px, then 520px) under-budgeted this by ~170px and ~20px respectively — re-verified
+       against the reviewer's own no-scroll proof criterion at all four
+       required viewports after the fix). */
+    --wall-cell: min(7vw, 26px, calc((100dvh - 560px) / var(--wall-rows, 14)));
+  }
+  /* F2: gives the floating feedback (.fast-badge/.wrong-helper below) a
+     containing block of `.question-info` itself (falling does the same) —
+     without this they position relative to `.screen`, whose own height can
+     grow to contain them (see the comment above), which is what actually
+     produced the shift. */
+  [data-screen="question"][data-wall="1"] .question-info { position: relative; }
+  .wall-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; width: 100%; }
+  .wall-well {
+    position: relative; direction: ltr; unicode-bidi: isolate;
+    width: calc(var(--wall-cols, 10) * var(--wall-cell, min(7vw, 26px)));
+    aspect-ratio: var(--wall-cols, 10) / var(--wall-rows, 14);
+    background: #EEF2FF; border: 2px solid rgba(79,124,255,0.25); border-radius: 10px;
+    overflow: hidden; margin: 0 auto; cursor: pointer;
+  }
+  .wall-cell { position: absolute; }
+  .wall-cell-1 { background: #4F7CFF; }
+  .wall-cell-2 { background: #9AA0A6; }
+  .wall-cell-3 { background: #C9D6FF; }
+  .wall-piece {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    background: var(--correct); color: #fff; font-weight: bold; font-size: 0.85rem;
+    border-radius: 4px; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.12);
+    transition: top var(--wall-duration, 10s) linear;
+  }
+  /* F3 (closing review 2026-08-29): these must be MORE specific than the base
+     `.wall-piece` rule above (a same-specificity `.wall-piece-2` declared
+     BEFORE it, as originally written, loses on source order and a wrong
+     piece stayed green until the next paint) and declared AFTER it so a
+     tie never depends on source order either. */
+  .wall-piece.wall-piece-1 { background: #4F7CFF; }
+  .wall-piece.wall-piece-2 { background: #9AA0A6; }
+  .wall-piece.wall-piece-3 { background: #C9D6FF; }
+  .wall-piece.landed { transition: none; }
+  .wall-controls { display: flex; gap: 1.2rem; direction: ltr; } /* ◀ must sit visually left of ▶, matching the forced-ltr well below */
+  .wall-controls button { min-width: 56px; padding: 0.6rem 1rem; }
+  /* Static option row reuses .lanes/.lane/.bubble — always `.landed` (no
+     fall animation) — sized just tall enough for one landed row. */
+  [data-screen="question"][data-wall="1"] .lanes { height: 140px; margin-top: 0.4rem; border-top: none; }
+  [data-screen="question"][data-wall="1"] .lanes::after { display: none; }
+  /* F4 continued: at the shortest portrait viewports (320x568/375x667) the
+     560px-budget cell shrinks to near-nothing (well under 10px). Recover a
+     usable well there by tightening the OTHER fixed-height chrome instead
+     of shrinking the well further: a shorter option row (matching the
+     landscape row's own 100px), smaller gaps, and less bottom padding — then
+     re-derive the height budget for this SMALLER chrome (460px, re-measured
+     the same way as the 560px figure above). Taller portrait (390x844) and
+     landscape keep their own rules below. */
+  @media (max-height: 700px) {
+    [data-screen="question"][data-wall="1"] {
+      gap: 0.4rem; padding-bottom: 2.4rem;
+      --wall-cell: min(7vw, 26px, calc((100dvh - 460px) / var(--wall-rows, 14)));
+    }
+    [data-screen="question"][data-wall="1"] .lanes { height: 100px; }
+  }
+  .wall-toast {
+    position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
+    background: var(--card-bg); color: var(--text); padding: 0.6rem 1.2rem;
+    border-radius: 999px; box-shadow: 0 8px 20px rgba(0,0,0,0.18); z-index: 900; font-weight: bold;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wall-piece { transition: none; }
+  }
+  @media (max-height: 420px) and (min-width: 480px) {
+    [data-screen="question"][data-wall="1"] { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; padding: 0.4rem 0.8rem 3.6rem; }
+    [data-screen="question"][data-wall="1"] [data-action="exit-bottom"] { position: static; width: 100%; }
+    [data-screen="question"][data-wall="1"] .audience { display: none; } /* landscape: no room for the decorative strip */
+    [data-screen="question"][data-wall="1"] .question-info { margin-top: 0; }
+    [data-screen="question"][data-wall="1"] .wall-wrap { width: auto; } /* base rule's width:100% would otherwise force a row-wrap onto its own line, undoing "well beside the card" */
+    [data-screen="question"][data-wall="1"] { --wall-cell: min(5vw, 20px, calc((100dvh - 190px) / var(--wall-rows, 14))); }
+    [data-screen="question"][data-wall="1"] .wall-well { width: calc(var(--wall-cols, 10) * var(--wall-cell, min(5vw, 20px))); }
+    [data-screen="question"][data-wall="1"] .lanes { height: 100px; width: min(300px, 40vw); }
+    [data-screen="question"][data-wall="1"] .falling-landed-label { width: 100%; text-align: center; }
   }
   #stale-card {
     display: none;

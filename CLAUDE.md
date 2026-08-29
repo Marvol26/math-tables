@@ -11,7 +11,8 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
   `CONFIG` (every tunable number), `Facts`, `Economy`, `Map` (journey map by
   tables — `docs/MAP-DESIGN.md`), `Selector` (weakness score + focus bonus for the
   current station's table), `Falling` (distractor generation for the falling-numbers
-  game mode — `docs/FALLING-DESIGN.md`),
+  game mode — `docs/FALLING-DESIGN.md`), `Wall` (well mechanics for "בונים קיר",
+  the build-the-wall game mode — `docs/WALL-DESIGN.md`; ships disabled by default),
   `SessionCore`, `Storage` (IndexedDB + localStorage mirror, transactional
   rev-check CAS writes), `Pin` (WebCrypto hashing), `Stats`, `Migrate`.
 - `index.html` — the document shell only (≈30 lines): head/meta, the
@@ -31,6 +32,7 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
   `window.MathText` for `T`/`escapeHtml`/`tableTag`/`bdi`: hash-based router
   (`Screens` map, `#screen=name`), boot sequence, screen render functions
   (home, question, `renderFallingQuestion` (falling-numbers game mode),
+  `renderWallQuestion` (build-the-wall game mode, "בונים קיר"),
   summary, map, collection, rewards, parent-setup, parent PIN/dashboard).
 - `sw.js` — service worker: generated `APP_VERSION`/`RELEASE`/`HASHED_ASSETS` lines
   (written by `tools/bump-version.js`, never by hand), install-time self-consistency gate, cache-first same-origin,
@@ -67,6 +69,10 @@ no runtime dependencies. Full design/decisions: `docs/DESIGN.md`,
    xor `_near`, plus `_series` alongside `_perfect` for a 2nd+ consecutive
    perfect round); a session id already in `sessions` is never re-applied —
    `SessionCore.finish()` is idempotent by design, not by caller discipline.
+   The wall mode (`docs/WALL-DESIGN.md`) mints **no new ledger ids** — a
+   wall-complete is a `session.wallsBuilt` count only, decoration and a
+   summary line, never its own coin source; coins still come from the facts
+   exactly as balloons.
 6. **Every `core.js` mutation call site must mutate inside `Storage.save()`'s
    own clone, never `App.storage.state` directly.** A failed save (stale or
    erroring) must leave `state` byte-identical to before the call. This

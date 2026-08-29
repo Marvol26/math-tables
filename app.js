@@ -172,7 +172,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.16.0"; // set by tools/bump-version.js — do not hand-edit
+  var APP_VERSION = "0.17.0"; // set by tools/bump-version.js — do not hand-edit
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -182,6 +182,22 @@
   window.App = App;
 
   function S() { return App.storage.state; }
+
+  // docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4 (package 4): the parked session
+  // of `mode`, if any — schema 3 replaces the single `state.parked` object
+  // with `state.parkedSessions` (array, at most two).
+  function parkedOf(state, mode) {
+    var list = state.parkedSessions;
+    if (!Array.isArray(list)) return null;
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i].mode || "typed") === mode) return list[i];
+    }
+    return null;
+  }
+
+  function anySuspended(state) {
+    return !!(state.active || (Array.isArray(state.parkedSessions) && state.parkedSessions.length > 0));
+  }
 
   function showStale() {
     var el = document.getElementById("stale-card");
@@ -282,6 +298,8 @@
     clearInterval(challengeTimerHandle); // never leave a challenge timer running behind a navigated-away screen
     clearTimeout(App.feedbackTimer); // P9: a pending answer-feedback timer must not paint a question over another screen
     clearFallingKeyHandler(); // never leave a falling-mode document keydown listener behind a navigated-away screen
+    clearWallKeyHandler(); // ditto for wall mode
+    clearWallCountdown(); // never leave a wall reduced-motion countdown ticking behind a navigated-away screen
     App.pendingContinue = null;
     App.feedbackLock = false;
     var layers = document.querySelectorAll(".confetti-layer, .fireworks");
@@ -450,10 +468,12 @@
     var showBackup = daysSinceExport > 14 && state.sessions.length > 0;
     var childName = (state.settings.childName || "").trim();
     var mapLine = mapStatusLine(state);
-    var isFallingActive = hasActive && state.active.mode === "falling";
-    var typedOpen = (hasActive && !isFallingActive) || (state.parked && (state.parked.mode || "typed") === "typed");
-    var fallingOpen = isFallingActive || (state.parked && state.parked.mode === "falling");
+    var activeMode = hasActive ? (state.active.mode || "typed") : null;
+    var typedOpen = activeMode === "typed" || !!parkedOf(state, "typed");
+    var fallingOpen = activeMode === "falling" || !!parkedOf(state, "falling");
+    var wallOpen = activeMode === "wall" || !!parkedOf(state, "wall");
     var showFallingBtn = !!(state.settings.falling && state.settings.falling.enabled) || fallingOpen;
+    var showWallBtn = !!(state.settings.wall && state.settings.wall.enabled) || wallOpen;
 
     render(
       '<div class="screen" data-screen="home">' +
@@ -463,6 +483,7 @@
         (totals.dailyStreak > 1 ? '<div class="muted">' + T.home.streakLabel(totals.dailyStreak) + "</div>" : "") +
         '<div class="map-status">' + mapLine + "</div>" +
         (showFallingBtn ? '<div><button data-action="play-falling">' + (fallingOpen ? T.home.resumeFallingCta : T.home.fallingBtn) + "</button></div>" : "") +
+        (showWallBtn ? '<div><button data-action="play-wall">' + (wallOpen ? T.home.resumeWallCta : T.home.wallBtn) + "</button></div>" : "") +
         '<div><button data-action="play">' + (typedOpen ? T.home.resumeCta : T.home.startCta) + "</button></div>" +
         '<div><button class="secondary" data-action="nav-map">' + T.home.mapBtn + "</button> " +
         '<button class="secondary" data-action="nav-collection">' + T.home.collectionBtn + "</button> " +
@@ -475,6 +496,7 @@
 
     bindAction("play", startOrResumeSession);
     bindAction("play-falling", startFallingSession);
+    bindAction("play-wall", startWallSession);
     bindAction("nav-collection", function () { navigate("collection"); });
     bindAction("nav-rewards", function () { navigate("rewards"); });
     bindAction("nav-map", function () { navigate("map"); });
@@ -491,20 +513,25 @@
     startOrResumeSession();
   });
 
-  // Typed mode: resume (with the parent's CURRENT settings) or start; a suspended
-  // falling session is parked meanwhile and returns when this one ends.
+  // Typed mode: resume (with the parent's CURRENT settings) or start; a
+  // suspended session of another mode is parked meanwhile and returns when
+  // this one ends (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4 — up to two
+  // other modes can be parked at once, state.parkedSessions).
   function startOrResumeSession() { switchMode("typed"); }
 
   function switchMode(mode) {
     save(function (s) { MathCore.SessionCore.switchTo(s, mode, Math.random, Date.now()); }).then(function (result) {
       if (result.ok) { navigate("question"); }
-    }).catch(function (err) { showSaveFailureBanner(String((err && err.message) || err)); }); // e.g. PARKED_EXISTS from a hand-edited backup — never a silently dead button
+    }).catch(function (err) { showSaveFailureBanner(String((err && err.message) || err)); }); // e.g. PARKED_FULL from a hand-edited backup — never a silently dead button
   }
 
   // Falling mode entry (docs/FALLING-DESIGN.md F1). Since 2026-08-28 a suspended
-  // session of the other mode is parked (state.parked) and returns when this
-  // one ends, so the balloon game is always reachable.
+  // session of another mode is parked (state.parkedSessions) and returns when
+  // this one ends, so the balloon game is always reachable.
   function startFallingSession() { switchMode("falling"); }
+
+  // Wall mode entry (docs/WALL-DESIGN.md §1) — same parking behaviour as falling.
+  function startWallSession() { switchMode("wall"); }
 
   function bindAction(action, handler) {
     var el = document.querySelector('[data-action="' + action + '"]');
@@ -563,7 +590,9 @@
   // submit/finish, showFeedback, finishSession) is shared between both modes.
   function renderCurrentQuestion() {
     var state = S();
-    if (state.active && state.active.mode === "falling") renderFallingQuestion();
+    var mode = state.active && state.active.mode;
+    if (mode === "falling") renderFallingQuestion();
+    else if (mode === "wall") renderWallQuestion();
     else renderQuestion();
   }
 
@@ -803,6 +832,237 @@
     document.addEventListener("keydown", fallingKeyHandler);
   }
 
+  // ------------------------------------------------------------------
+  // Screen: Wall question (docs/WALL-DESIGN.md) — "בונים קיר". Shares dots/
+  // coin badge/exit buttons/paintNextQuestion/submitAnswer/showFeedback/
+  // finishSession with the typed/falling screens; only the well + option
+  // row differ. The well/column position is UI-local (never saved except
+  // with the answer, per §1); the reducer (core.js Wall.step) is the only
+  // source of truth for the grid — this screen only PREVIEWS the landing
+  // row from the CURRENT (pre-answer) grid, which core.js computes the
+  // exact same way, so the preview and the real placement never disagree.
+  // ------------------------------------------------------------------
+  var wallKeyHandler = null;
+  var wallCountdownHandle = null;
+  var wallX = null; // UI-local column, re-centred on every new question
+  var wallQuestionKey = null;
+
+  function clearWallKeyHandler() {
+    if (wallKeyHandler) { document.removeEventListener("keydown", wallKeyHandler); wallKeyHandler = null; }
+  }
+  function clearWallCountdown() {
+    clearInterval(wallCountdownHandle);
+    wallCountdownHandle = null;
+  }
+
+  function showWallResetToast() {
+    var el = document.createElement("div");
+    el.className = "wall-toast";
+    el.textContent = T.wall.full;
+    document.body.appendChild(el);
+    try { confettiBurst(24); } catch (e) { /* decoration only */ }
+    // Reuses CONFIG.WRONG_ANSWER_DISPLAY_MS (I7: no new magic number for a
+    // second transient-message duration that plays the same role).
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, CONFIG.WRONG_ANSWER_DISPLAY_MS);
+  }
+
+  function renderWallQuestion() {
+    var state = S();
+    var vm = questionViewModel(state);
+    if (!vm) return;
+    var active = vm.active, current = vm.current, parts = vm.parts, dotsHtml = vm.dotsHtml, doneOrRetryCount = vm.doneOrRetryCount, value = vm.value;
+    clearWallKeyHandler();
+    clearWallCountdown();
+
+    var wallSnapshot = active.settingsSnapshot.wall || {};
+    var options = wallSnapshot.options || CONFIG.WALL.DEFAULT_OPTIONS;
+    var durationSec = wallSnapshot.durationSec || CONFIG.WALL.DEFAULT_DURATION_SEC;
+    var rng = seededRngFromString(active.id + ":" + current.asked + ":" + current.shownAt);
+    var candidateValues = MathCore.Falling.candidates(parts[0], parts[1], options, rng);
+
+    var cols = CONFIG.WALL.COLS, rows = CONFIG.WALL.ROWS;
+    var w = parts[0], h = parts[1];
+    var grid = (active.wall && active.wall.grid) || MathCore.Wall.emptyGrid(rows, cols);
+
+    // A deferred piece (or any new question) re-centres (§1 "a deferred
+    // piece re-centres"); moving within the SAME question keeps its spot.
+    var questionKey = current.asked + ":" + current.shownAt;
+    if (wallQuestionKey !== questionKey || wallX === null) {
+      wallX = Math.max(0, Math.min(cols - w, Math.floor((cols - w) / 2)));
+      wallQuestionKey = questionKey;
+    }
+    wallX = Math.max(0, Math.min(cols - w, wallX));
+
+    var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var deadline = current.shownAt + durationSec * 1000;
+    var alreadyLanded = !!current.interrupted;
+
+    function previewLandingRow(x) {
+      var y = MathCore.Wall.landingRow(grid, x, w, h);
+      return y < 0 ? rows - h : y; // a full well always resets into a FRESH (empty) one, which lands at the floor
+    }
+
+    var cellsHtml = "";
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var cellV = grid[r][c];
+        if (cellV) {
+          cellsHtml += '<div class="wall-cell wall-cell-' + cellV + '" style="left:' + (c / cols * 100) + '%;top:' + (r / rows * 100) + '%;width:' + (100 / cols) + '%;height:' + (100 / rows) + '%"></div>';
+        }
+      }
+    }
+
+    var landingTopPct = previewLandingRow(wallX) / rows * 100;
+    var startTopPct = -(h / rows * 100);
+    var pieceStartsLanded = alreadyLanded; // reduced motion starts NOT landed (counts down first)
+    var initialTopPct = pieceStartsLanded ? landingTopPct : startTopPct;
+    var pieceHtml =
+      '<div class="wall-piece' + (pieceStartsLanded ? " landed" : "") + '" id="wall-piece" style="left:' + (wallX / cols * 100) + '%;top:' + initialTopPct + '%;width:' + (w / cols * 100) + '%;height:' + (h / rows * 100) + '%">' +
+      parts[0] + "×" + parts[1] +
+      "</div>";
+
+    // Option row: static bubbles reusing `.lanes`/`.lane`/`.bubble` styling
+    // (docs/WALL-DESIGN.md §1's rendering note) — always `.landed`, never the
+    // falling animation, since these never fall.
+    var bubblesHtml = candidateValues.map(function (v, i) {
+      return '<div class="lane"><button class="bubble landed" data-value="' + Number(v) + '" data-lane="' + i + '">' + Number(v) + "</button></div>";
+    }).join("");
+
+    render(
+      '<div class="screen" data-screen="question" data-wall="1" style="--wall-cols:' + cols + ';--wall-rows:' + rows + ';--wall-duration:' + durationSec + 's">' +
+        audienceHtml(state, active.id) +
+        '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem;z-index:4">' + T.question.exitButton + "</button>" +
+        '<div class="question-info">' +
+        '<div class="dots">' + dotsHtml + "</div>" +
+        '<div class="dots-text muted">' + doneOrRetryCount + "/" + active.planned.length + "</div>" +
+        '<div class="map-status">' + mapStatusLine(state) + "</div>" +
+        (current.interrupted ? '<div class="muted interrupted-label">' + T.question.interruptedLabel + "</div>" : "") +
+        '<div class="coin-pill">' + T.question.equalsCoin(value) + "</div>" +
+        '<div class="equation ltr" id="equation"><span>' + parts[0] + "</span><span>×</span><span>" + parts[1] + "</span></div>" +
+        (current.mirror ? '<div class="muted mirror-hint">' + T.question.mirrorHint + "</div>" : "") +
+        "</div>" +
+        '<div class="wall-wrap">' +
+        '<div class="wall-well" id="wall-well">' + cellsHtml + pieceHtml + "</div>" +
+        '<div class="wall-controls"><button class="secondary" data-action="wall-left">◀</button><button class="secondary" data-action="wall-right">▶</button></div>' +
+        "</div>" +
+        '<div class="lanes wall-options" data-n="' + Number(options) + '">' + bubblesHtml + "</div>" +
+        '<div class="muted falling-landed-label" id="wall-landed-label">' + (pieceStartsLanded ? T.question.fallingLandedLabel : "") + "</div>" +
+        '<button class="ghost" data-action="exit-bottom">' + T.question.exitBottom + "</button>" +
+        "</div>"
+    );
+
+    bindAction("exit", onExitClick);
+    bindAction("exit-bottom", onExitClick);
+
+    function moveWallPiece(newX) {
+      if (App.feedbackLock) return;
+      wallX = Math.max(0, Math.min(cols - w, newX));
+      var pieceEl = document.getElementById("wall-piece");
+      if (!pieceEl) return;
+      pieceEl.style.left = (wallX / cols * 100) + "%";
+      var topPct = previewLandingRow(wallX) / rows * 100;
+      if (pieceEl.classList.contains("landed") || reducedMotion) {
+        pieceEl.style.top = topPct + "%"; // already landed/stationary: move instantly, no fall
+      } else {
+        // F1 LOW (closing review 2026-08-29): re-targeting `top` mid-fall with
+        // the FULL `--wall-duration` would restart a whole new multi-second
+        // transition from wherever the piece currently sits, landing well
+        // after the real `deadline` (and visually travelling UPWARD if the
+        // new column lands higher) — retarget with only the time REMAINING
+        // until `deadline` instead, so it still visually lands on time.
+        var remainingSec = Math.max(0.05, (deadline - Date.now()) / 1000);
+        pieceEl.style.transitionDuration = remainingSec + "s";
+        pieceEl.style.top = topPct + "%";
+      }
+    }
+
+    bindAction("wall-left", function () { moveWallPiece(wallX - 1); });
+    bindAction("wall-right", function () { moveWallPiece(wallX + 1); });
+
+    var wellEl = document.getElementById("wall-well");
+    if (wellEl) {
+      wellEl.addEventListener("click", function (ev) {
+        var rect = wellEl.getBoundingClientRect();
+        var frac = (ev.clientX - rect.left) / rect.width;
+        var col = Math.max(0, Math.min(cols - 1, Math.floor(frac * cols)));
+        moveWallPiece(col - Math.floor(w / 2)); // centre the piece under the tap
+      });
+    }
+
+    var bubbleEls = document.querySelectorAll(".wall-options .bubble");
+    bubbleEls.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (App.feedbackLock) return;
+        document.querySelectorAll(".wall-options .bubble.picked").forEach(function (b) { b.classList.remove("picked"); });
+        btn.classList.add("picked");
+        submitAnswer(Number(btn.dataset.value), { x: wallX });
+      });
+    });
+
+    wallKeyHandler = function (ev) {
+      if (App.feedbackLock) return;
+      if (document.querySelector('[data-action="exit-yes"]')) return; // exit-confirm overlay is open
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+        moveWallPiece(wallX + (ev.key === "ArrowLeft" ? -1 : 1));
+        ev.preventDefault();
+        return;
+      }
+      var n = Number(ev.key);
+      if (!n || n < 1 || n > options) return;
+      var btn = document.querySelector('.wall-options .bubble[data-lane="' + (n - 1) + '"]');
+      if (btn) { document.querySelectorAll(".wall-options .bubble.picked").forEach(function (b) { b.classList.remove("picked"); }); btn.classList.add("picked"); submitAnswer(Number(btn.dataset.value), { x: wallX }); }
+    };
+    document.addEventListener("keydown", wallKeyHandler);
+
+    var pieceEl0 = document.getElementById("wall-piece");
+    if (!pieceStartsLanded && !reducedMotion) {
+      // Trigger the CSS `top` transition one frame after mount (the falling
+      // screen's `nextFrame` pattern) — `transitionend` only ever toggles the
+      // VISUAL `.landed` class; core.js's `deadline` stays the source of
+      // truth for ×2, exactly like falling.
+      nextFrame(function () {
+        var el = document.getElementById("wall-piece");
+        if (!el) return;
+        // F1 HIGH (closing review 2026-08-29): without a forced style flush
+        // here, the browser can coalesce the insertion style (`top:startTopPct`)
+        // and this target-style write into a single paint — no "from" state is
+        // ever committed, so the CSS transition never plays: no visible fall,
+        // no `transitionend`, `.landed`/the landed label never appear, and the
+        // piece silently sits at its landing row from t=0 (confirmed by the
+        // reviewer's rv-ui2.js sampler and this build's own wall-390x844-midfall
+        // screenshot). Reading a layout property forces the flush.
+        void el.offsetHeight;
+        el.style.top = landingTopPct + "%";
+      });
+      if (pieceEl0) {
+        pieceEl0.addEventListener("transitionend", function onEnd(ev) {
+          if (ev.propertyName !== "top") return;
+          pieceEl0.classList.add("landed");
+          var lbl = document.getElementById("wall-landed-label");
+          if (lbl) lbl.textContent = T.question.fallingLandedLabel;
+        });
+      }
+    } else if (!pieceStartsLanded && reducedMotion) {
+      // Reduced motion (§1 rendering note): stationary at the top with a
+      // numeric countdown; jumps to the landed position (and gets `.landed`)
+      // only once the deadline passes — the phase/×2 rule is unchanged.
+      var lbl0 = document.getElementById("wall-landed-label");
+      var tick = function () {
+        var remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          clearWallCountdown();
+          var el = document.getElementById("wall-piece");
+          if (el) { el.style.top = landingTopPct + "%"; el.classList.add("landed"); }
+          if (lbl0) lbl0.textContent = T.question.fallingLandedLabel;
+          return;
+        }
+        if (lbl0) lbl0.textContent = bdi(Math.ceil(remaining / 1000));
+      };
+      tick();
+      wallCountdownHandle = setInterval(tick, 1000);
+    }
+  }
+
   function renderNumpad() {
     var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "check"];
     return '<div class="numpad">' + keys.map(function (k) {
@@ -931,10 +1191,13 @@
     );
   }
 
-  // `value` is passed directly by the falling screen (the tapped bubble's
-  // number); the typed screen calls this with no argument and it reads the
-  // numpad/keyboard input exactly as before (WP-F3: one shared submit path).
-  function submitAnswer(value) {
+  // `value` is passed directly by the falling/wall screens (the tapped
+  // bubble's number); the typed screen calls this with no argument and it
+  // reads the numpad/keyboard input exactly as before (WP-F3: one shared
+  // submit path). `opts.x` (docs/WALL-DESIGN.md §1) is the wall screen's
+  // UI-local column — SessionCore.submit runs the pure Wall reducer with it
+  // inside this SAME save, only for mode:"wall" (ignored otherwise).
+  function submitAnswer(value, opts) {
     if (App.feedbackLock) return;
     // A leftover falling bubble from the PREVIOUS question stays in the DOM
     // (paused, not removed) while the next question's paint save is still
@@ -953,7 +1216,7 @@
     App.feedbackLock = true;
     clearInterval(challengeTimerHandle);
     document.querySelectorAll(".bubble").forEach(function (b) { if (!b.classList.contains("picked")) b.style.animationPlayState = "paused"; });
-    save(function (s) { return MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); })
+    save(function (s) { return MathCore.SessionCore.submit(s, Number(value), Date.now(), opts || {}); })
       .then(function (result) {
         if (!result.ok) { App.feedbackLock = false; return; } // stale/error already surfaced via banner/stale card
         showFeedback(result.value);
@@ -995,6 +1258,28 @@
     }
   }
 
+  // Wall mode reaction (docs/WALL-DESIGN.md §1): the piece is already
+  // animating (or already stationary, reduced motion/interrupted) toward
+  // the exact spot core.js's Wall reducer just placed it — landing depends
+  // only on the PRE-answer grid/x/w/h, which the screen previewed
+  // identically, so no repositioning is needed here, only: snap it visually
+  // `.landed`, colour it by outcome (1 correct / 2 wrong-grey / 3 retry —
+  // matches core.js's cell semantics), disable further column moves, and
+  // show the wall-complete toast when this submit overflowed the well.
+  function wallReactions(result) {
+    clearWallCountdown();
+    var pieceEl = document.getElementById("wall-piece");
+    if (pieceEl) {
+      pieceEl.classList.add("landed");
+      pieceEl.classList.remove("wall-piece-1", "wall-piece-2", "wall-piece-3");
+      pieceEl.classList.add(result.retry ? "wall-piece-3" : (result.ok ? "wall-piece-1" : "wall-piece-2"));
+    }
+    var lbl = document.getElementById("wall-landed-label");
+    if (lbl) lbl.textContent = T.question.fallingLandedLabel;
+    document.querySelectorAll(".wall-controls button").forEach(function (b) { b.disabled = true; });
+    if (result.wallReset) showWallResetToast();
+  }
+
   function showFeedback(result) {
     var screenEl = document.querySelector('[data-screen="question"]');
     if (!screenEl) return; // the child left mid-save; route() already cleared the lock
@@ -1004,6 +1289,7 @@
       if (fast) screenEl.classList.add("feedback-fast"); // classList.add takes one token per argument
     }
     if (screenEl && screenEl.dataset.falling) balloonReactions(result);
+    if (screenEl && screenEl.dataset.wall) wallReactions(result);
     var equation = document.getElementById("equation");
     var note = document.createElement("div");
     if (!result.ok) {
@@ -1132,7 +1418,7 @@
       : session.firstTryCorrect / session.planned.length >= CONFIG.STARS_TWO_RATIO
         ? 2
         : 1;
-    var fallingSuffix = session.mode === "falling" ? " 🎈" : "";
+    var fallingSuffix = session.mode === "falling" ? " 🎈" : session.mode === "wall" ? " 🧱" : "";
     // D2 (Marat 2026-08-28): a perfect round that is 2nd+ in a row gets its own
     // title + series-bonus banner instead of the plain perfect title.
     var titleHtml = session.perfect && session.perfectSeries >= 2
@@ -1174,6 +1460,11 @@
             (info ? '<div class="sticker-name">' + escapeHtml(info.name) + "</div><div class=\"sticker-nick\">" + escapeHtml(info.nick) + "</div>" : "");
         }).join(" ") + "</div>"
       : "";
+    // docs/WALL-DESIGN.md §1 summary line, shown only for a wall session that
+    // built at least one wall.
+    var wallsBuiltHtml = session.mode === "wall" && session.wallsBuilt >= 1
+      ? "<p>" + T.summary.wallsBuilt(session.wallsBuilt) + "</p>"
+      : "";
 
     render(
       '<div class="screen" data-screen="summary">' +
@@ -1183,13 +1474,14 @@
         "<p>" + bdi(session.firstTryCorrect + "/" + session.planned.length) + "</p>" +
         '<div class="coin-pill">' + T.summary.coinsEarned(session.coinsEarned) + "</div>" +
         learnedList +
+        wallsBuiltHtml +
         stationHtml +
         unlockHtml +
         '<button data-action="again">' + T.summary.nextSessionBtn + "</button> " +
         '<button class="secondary" data-action="done">' + T.summary.doneBtn + "</button>" +
         "</div>"
     );
-    bindAction("again", function () { switchMode(session.mode === "falling" ? "falling" : "typed"); }); // "עוד סבב" stays in the same game
+    bindAction("again", function () { switchMode(session.mode === "falling" || session.mode === "wall" ? session.mode : "typed"); }); // "עוד סבב" stays in the same game
     bindAction("done", function () { navigate("home"); });
     try {
       if (session.perfect && session.perfectSeries >= 3) {
@@ -1510,6 +1802,7 @@
 
   function renderSettingsSection(state) {
     var falling = state.settings.falling || { enabled: false, durationSec: CONFIG.FALLING.DEFAULT_DURATION_SEC, options: CONFIG.FALLING.DEFAULT_OPTIONS };
+    var wall = state.settings.wall || { enabled: false, durationSec: CONFIG.WALL.DEFAULT_DURATION_SEC, options: CONFIG.WALL.DEFAULT_OPTIONS };
     return (
       '<div class="card" style="margin-bottom:1rem">' +
       "<h2>" + T.parent.settingsTitle + "</h2>" +
@@ -1526,6 +1819,18 @@
         var opts = "";
         for (var n = CONFIG.FALLING.MIN_OPTIONS; n <= CONFIG.FALLING.MAX_OPTIONS; n++) {
           opts += '<option value="' + n + '"' + (falling.options === n ? " selected" : "") + ">" + n + "</option>";
+        }
+        return opts;
+      })() +
+      "</select></label><br><br>" +
+      '<label><input id="set-wall-enable" type="checkbox" ' + (wall.enabled ? "checked" : "") + " /> " + T.parent.wallEnableLabel + "</label><br><br>" +
+      "<label>" + T.parent.wallDurationLabel + ': <span id="set-wall-duration-value">' + wall.durationSec + "</span><br>" +
+      '<input id="set-wall-duration" type="range" min="' + CONFIG.WALL.MIN_DURATION_SEC + '" max="' + CONFIG.WALL.MAX_DURATION_SEC + '" value="' + wall.durationSec + '" /></label><br><br>' +
+      "<label>" + T.parent.wallOptionsLabel + '<br><select id="set-wall-options">' +
+      (function () {
+        var opts = "";
+        for (var n = CONFIG.WALL.MIN_OPTIONS; n <= CONFIG.WALL.MAX_OPTIONS; n++) {
+          opts += '<option value="' + n + '"' + (wall.options === n ? " selected" : "") + ">" + n + "</option>";
         }
         return opts;
       })() +
@@ -1548,6 +1853,10 @@
     fallingRangeInput.addEventListener("input", function () {
       document.getElementById("set-falling-duration-value").textContent = fallingRangeInput.value;
     });
+    var wallRangeInput = document.getElementById("set-wall-duration");
+    wallRangeInput.addEventListener("input", function () {
+      document.getElementById("set-wall-duration-value").textContent = wallRangeInput.value;
+    });
     var sessionSizeInput = document.getElementById("set-session-size");
     sessionSizeInput.addEventListener("input", function () {
       document.getElementById("set-session-size-value").textContent = sessionSizeInput.value;
@@ -1560,6 +1869,9 @@
       var fallingEnabled = document.getElementById("set-falling-enable").checked;
       var fallingDurationSec = Number(document.getElementById("set-falling-duration").value);
       var fallingOptions = Number(document.getElementById("set-falling-options").value);
+      var wallEnabled = document.getElementById("set-wall-enable").checked;
+      var wallDurationSec = Number(document.getElementById("set-wall-duration").value);
+      var wallOptions = Number(document.getElementById("set-wall-options").value);
       var sessionSize = Number(document.getElementById("set-session-size").value);
       save(function (s) {
         s.settings.childName = name;
@@ -1567,6 +1879,7 @@
         s.settings.timeLimitSec = timeLimitSec;
         s.settings.sound = sound;
         s.settings.falling = { enabled: fallingEnabled, durationSec: fallingDurationSec, options: fallingOptions };
+        s.settings.wall = { enabled: wallEnabled, durationSec: wallDurationSec, options: wallOptions };
         s.settings.sessionSize = sessionSize;
       }).then(function (result) {
         if (result.ok) document.getElementById("settings-saved-msg").textContent = T.parent.settingsSaved;
@@ -1831,8 +2144,8 @@
   }
 
   function modeLegendHtml() {
-    var order = ["typed", "falling", "tetris"];
-    var strokes = { typed: "#4F7CFF", falling: "#FF6F91", tetris: "#3CC97A" };
+    var order = ["typed", "falling", "wall"];
+    var strokes = { typed: "#4F7CFF", falling: "#FF6F91", wall: "#3CC97A" };
     return (
       '<div class="muted" style="font-size:0.8em">' + escapeHtml(T.parent.modeLegend) + ": " +
       order.map(function (m) { return '<span style="color:' + strokes[m] + '">●</span> ' + escapeHtml(T.parent.modeNames[m]); }).join(" · ") +
@@ -1849,8 +2162,8 @@
     var overallAccuracy = totalAttempts ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
     var trends = MathCore.Stats.trends(state, 30);
-    var modeStrokes = { typed: "#4F7CFF", falling: "#FF6F91", tetris: "#3CC97A" };
-    var modeOrder = ["typed", "falling", "tetris"];
+    var modeStrokes = { typed: "#4F7CFF", falling: "#FF6F91", wall: "#3CC97A" };
+    var modeOrder = ["typed", "falling", "wall"];
     function nullMap(arr, fn) { return arr.map(function (v) { return v === null ? null : fn(v); }); }
     var chart1 = multiLineChartSvg(
       modeOrder.map(function (m) { return { key: T.parent.modeNames[m], values: nullMap(trends.accuracy[m], function (v) { return v * 100; }), stroke: modeStrokes[m] }; }),
@@ -1907,12 +2220,12 @@
 
     var historyRows = state.sessions.slice(-20).reverse();
     var historyHtml =
-      ((state.active || state.parked) ? '<div class="reward-item"><span>' + T.parent.historyOpen + "</span><span>—</span></div>" : "") +
+      (anySuspended(state) ? '<div class="reward-item"><span>' + T.parent.historyOpen + "</span><span>—</span></div>" : "") +
       (historyRows.length
         ? historyRows
             .map(function (sess) {
               var dateStr = new Date(sess.endedAt).toLocaleDateString("he-IL");
-              var fallingMark = sess.mode === "falling" ? " 🎈" : "";
+              var fallingMark = sess.mode === "falling" ? " 🎈" : sess.mode === "wall" ? " 🧱" : "";
               var seriesMark = sess.perfectSeries >= 2 ? " 🔥" + bdi(sess.perfectSeries) : "";
               return '<div class="reward-item"><span>' + bdi(dateStr) + " — " + bdi(sess.firstTryCorrect + "/" + sess.planned.length) + fallingMark + seriesMark + "</span><span>" + bdi(sess.coinsEarned) + " 🪙</span></div>";
             })
@@ -2136,7 +2449,7 @@
         ? raw.economy.ledger.reduce(function (sum, e) { return e.type === "earn" ? sum + e.amount : sum; }, 0)
         : 0;
     var exportDate = raw.lastExportAt ? new Date(raw.lastExportAt).toLocaleDateString("he-IL") : "—";
-    var warning = (S().active || S().parked) ? '<p class="muted">' + T.parent.importWarningActive + "</p>" : "";
+    var warning = anySuspended(S()) ? '<p class="muted">' + T.parent.importWarningActive + "</p>" : "";
     var area = document.getElementById("import-preview-area");
     area.innerHTML =
       '<div class="card">' +

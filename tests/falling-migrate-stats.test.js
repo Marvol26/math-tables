@@ -103,7 +103,7 @@ test("Stats.trends: per-mode accuracy/avgMs series are null-aligned to the commo
 
   assert.deepEqual(trends.accuracy.typed, [0.5, null]);
   assert.deepEqual(trends.accuracy.falling, [null, 1]);
-  assert.deepEqual(trends.accuracy.tetris, [null, null]);
+  assert.deepEqual(trends.accuracy.wall, [null, null]);
   assert.deepEqual(trends.avgMs.typed, [1500, null]);
   assert.deepEqual(trends.avgMs.falling, [null, 500]);
   assert.deepEqual(trends.masteredCount, [5, 7]); // both sessions — mastery/map move for falling too

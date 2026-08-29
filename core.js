@@ -84,7 +84,11 @@
 
     // Storage / retention
     ATTEMPTS_RETENTION_SESSIONS: 200,
-    SCHEMA_VERSION: 2,
+    // 2 -> 3 (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4, package 4): additive
+    // `state.parkedSessions` (array) replaces `state.parked` (single object)
+    // so an older client cannot load-and-resave the state and silently drop
+    // a second parked journal.
+    SCHEMA_VERSION: 3,
 
     // Evidence rebuild (V2-DESIGN §2 B2a; closing-review 0-R MEDIUM-3, 2026-08-28):
     // tolerance for a device clock stepping mid-question (observed on iOS) —
@@ -118,6 +122,22 @@
       // the exercise is readable first. The ×2 window still counts from
       // shownAt — 0.6s is negligible against an 8s fall.
       START_DELAY_MS: 600,
+    },
+
+    // "בונים קיר" build-the-wall mode (docs/WALL-DESIGN.md, Marat 2026-08-29;
+    // replaces the abandoned Rectangle Tetris after its §4.6 feasibility gate
+    // failed — same well mechanics, no row-clearing/scoring). Bounds mirror
+    // CONFIG.FALLING (durationSec/options are the SAME parent-facing slider
+    // shape, just a second mode's settings block).
+    WALL: {
+      COLS: 10,
+      ROWS: 14,
+      DEFAULT_DURATION_SEC: 10,
+      MIN_DURATION_SEC: 3,
+      MAX_DURATION_SEC: 20,
+      DEFAULT_OPTIONS: 4,
+      MIN_OPTIONS: 4,
+      MAX_OPTIONS: 6,
     },
 
     // Spectators ("הקהל", V2-DESIGN §3.2). Zero layout impact by design.
@@ -890,6 +910,98 @@
     },
   };
 
+  // --------------------------------------------------------------------
+  // Wall — pure "בונים קיר" (build the wall) well mechanics
+  // (docs/WALL-DESIGN.md §2, package 4). No DOM, no timers: the CSS fall/
+  // landing animation is a projection only (§1's rendering bullet) — this
+  // section is the source of truth for the grid and wall-complete count.
+  // Adapted from the parked `tetris-wip` branch's `Tetris` section
+  // (landingRow/place/overflows), renamed and stripped of row clearing and
+  // coin scoring — a full wall is never a penalty and mints nothing itself
+  // (coins come from the facts only, exactly as balloons — no new ledger ids).
+  //
+  // grid: ROWS arrays of COLS cells. Cell values: 0 empty, 1 first-attempt
+  // correct, 2 wrong (grey), 3 retry (light — never a first attempt).
+  // Row 0 is the TOP of the well; row (rows-1) is the floor.
+  // --------------------------------------------------------------------
+  var Wall = {
+    emptyGrid: function (rows, cols) {
+      var grid = [];
+      for (var r = 0; r < rows; r++) grid.push(new Array(cols).fill(0));
+      return grid;
+    },
+
+    // Rigid drop (no rotation, no sliding under overhangs): returns the row
+    // index of the piece's TOP once it rests on the floor or on the highest
+    // filled cell among the columns it spans, or -1 if it cannot fit
+    // anywhere in the well (a full wall — the caller resets and retries).
+    landingRow: function (grid, x, w, h) {
+      var rows = grid.length;
+      var cols = rows > 0 ? grid[0].length : 0;
+      if (w <= 0 || h <= 0 || x < 0 || x + w > cols) return -1;
+      var surface = rows; // an empty column's floor sits just past the last row
+      for (var c = x; c < x + w; c++) {
+        for (var r = 0; r < rows; r++) {
+          if (grid[r][c] !== 0) {
+            if (r < surface) surface = r;
+            break;
+          }
+        }
+      }
+      var y = surface - h;
+      return y < 0 ? -1 : y;
+    },
+
+    // Never mutates `grid` — returns a new grid with the piece stamped at
+    // rows [y, y+h) x cols [x, x+w) as `cell`.
+    place: function (grid, x, y, w, h, cell) {
+      var next = grid.map(function (row) { return row.slice(); });
+      for (var r = y; r < y + h; r++) {
+        for (var c = x; c < x + w; c++) next[r][c] = cell;
+      }
+      return next;
+    },
+
+    // Deterministic reducer (docs/WALL-DESIGN.md §1's "Round" bullet).
+    // `wallState = { grid, x, wallsBuilt }` (exactly the persisted
+    // `active.wall` journal shape — §1's "State" bullet); `w`/`h` are the
+    // CURRENT question's asked dimensions, recomputed by the caller from
+    // `active.current` on every submit rather than persisted redundantly in
+    // the journal (they are implied by whichever fact is on screen).
+    // `event = { x, w, h, cell }` where `cell` in/{1,2,3} is already
+    // resolved by the caller (SessionCore.submit): 1 first-attempt correct,
+    // 2 wrong, 3 retry. Order: landing -> if it does not fit, the wall is
+    // complete (wallsBuilt++, fresh empty grid, recompute landing in it —
+    // the triggering piece is placed there, never discarded) -> place.
+    // One call = one save; the caller is responsible for calling this at
+    // most once per submit, exactly as submit() itself runs once per answer.
+    step: function (wallState, event) {
+      if (!event) return wallState;
+      var w = event.w;
+      var h = event.h;
+      var grid = wallState.grid;
+      var cols = grid.length > 0 ? grid[0].length : 0;
+      var x = Math.max(0, Math.min(event.x | 0, cols - w));
+      var y = Wall.landingRow(grid, x, w, h);
+      var reset = false;
+      var wallsBuilt = wallState.wallsBuilt || 0;
+      if (y < 0) {
+        grid = Wall.emptyGrid(grid.length, cols);
+        y = Wall.landingRow(grid, x, w, h); // a fresh wall always fits h <= ROWS
+        reset = true;
+        wallsBuilt += 1;
+      }
+      var placed = Wall.place(grid, x, y, w, h, event.cell);
+      return {
+        grid: placed,
+        x: x,
+        wallsBuilt: wallsBuilt,
+        reset: reset, // transient: caller shows T.wall.full once, never persisted back
+        y: y,
+      };
+    },
+  };
+
   // S3-3: three private helpers pulled out of SessionCore.finish (pure
   // extraction — same order of ledger appends, same computed values; not
   // exported, only `SessionCore.finish` calls them).
@@ -954,16 +1066,16 @@
     return { totalCoins: totalCoins, perfect: perfect, perfectSeries: perfectSeries };
   }
 
-  // Falling mode never touches carryover (I-F1) — state.carryover stays
-  // exactly as it was when the session started. Typed: leftover = the
-  // carryover keys NOT consumed by this session (by key, via
-  // active.carryoverTaken — V2-DESIGN §3.3), not a slice by size; a legacy
-  // journal with no carryoverTaken field falls back to the old "first
+  // Falling/wall never touch carryover (I-F1; docs/WALL-DESIGN.md §1 "carryover
+  // off") — state.carryover stays exactly as it was when the session started.
+  // Typed: leftover = the carryover keys NOT consumed by this session (by
+  // key, via active.carryoverTaken — V2-DESIGN §3.3), not a slice by size; a
+  // legacy journal with no carryoverTaken field falls back to the old "first
   // planned.length carryover keys" behaviour.
   function computeNextCarryover(state, active, misses) {
-    var isFalling = active.mode === "falling";
+    var carryoverOff = active.mode === "falling" || active.mode === "wall";
     var carryover = state.carryover || [];
-    if (isFalling) return carryover;
+    if (carryoverOff) return carryover;
     var taken = Array.isArray(active.carryoverTaken) ? active.carryoverTaken : carryover.slice(0, active.planned.length);
     var takenSet = new Set(taken);
     var leftoverCarryover = carryover.filter(function (k) { return !takenSet.has(k); });
@@ -994,33 +1106,59 @@
       masteredAfter: masteredAfter,
       unlocksEarned: unlocksEarned,
       stationsReached: stationsReached,
+      // docs/WALL-DESIGN.md §1 summary line "קירות שבנית"; 0 for every
+      // non-wall session (no new ledger ids — coins already came from the
+      // facts via the ordinary earn ledger entry above).
+      wallsBuilt: active.wall ? active.wall.wallsBuilt : 0,
     };
   }
 
   // --------------------------------------------------------------------
   // SessionCore — pure state transitions on state.active (DESIGN §6, §7)
   // --------------------------------------------------------------------
+  // The three playable modes (docs/WALL-DESIGN.md package 4 adds "wall" to
+  // typed/falling). Order matters for `parkedSessions` slot-count limits and
+  // for `Stats.trends`/chart iteration elsewhere.
+  var GAME_MODES = ["typed", "falling", "wall"];
+  function normalizeMode(mode) {
+    return GAME_MODES.indexOf(mode) !== -1 ? mode : "typed";
+  }
+  var MAX_PARKED_SESSIONS = 2;
+
   var SessionCore = {
     // Creates state.active from a fresh plan. Mutates `state`, returns state.active.
-    // `opts.mode` = "typed" (default) | "falling" (docs/FALLING-DESIGN.md).
-    // The rules a session plays by, taken from the CURRENT settings. Falling
-    // mode's ×2 comes from the same withinLimit/timeLimitSec path as Challenge
-    // Mode (F9/I-F4) — no separate timing code in the UI layer.
+    // `opts.mode` = "typed" (default) | "falling" | "wall" (docs/FALLING-DESIGN.md,
+    // docs/WALL-DESIGN.md). The rules a session plays by, taken from the CURRENT
+    // settings. Falling/wall's ×2 comes from the same withinLimit/timeLimitSec
+    // path as Challenge Mode (F9/I-F4) — no separate timing code in the UI layer.
     buildSnapshot: function (state, mode) {
-      var falling = state.settings.falling || {};
-      return mode === "falling"
-        ? {
-            challengeOn: true,
-            timeLimitSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
-            falling: {
-              durationSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
-              options: falling.options || CONFIG.FALLING.DEFAULT_OPTIONS,
-            },
-          }
-        : {
-            challengeOn: !!state.settings.challengeOn,
-            timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
-          };
+      mode = normalizeMode(mode);
+      if (mode === "falling") {
+        var falling = state.settings.falling || {};
+        return {
+          challengeOn: true,
+          timeLimitSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+          falling: {
+            durationSec: falling.durationSec || CONFIG.FALLING.DEFAULT_DURATION_SEC,
+            options: falling.options || CONFIG.FALLING.DEFAULT_OPTIONS,
+          },
+        };
+      }
+      if (mode === "wall") {
+        var wall = state.settings.wall || {};
+        return {
+          challengeOn: true,
+          timeLimitSec: wall.durationSec || CONFIG.WALL.DEFAULT_DURATION_SEC,
+          wall: {
+            durationSec: wall.durationSec || CONFIG.WALL.DEFAULT_DURATION_SEC,
+            options: wall.options || CONFIG.WALL.DEFAULT_OPTIONS,
+          },
+        };
+      }
+      return {
+        challengeOn: !!state.settings.challengeOn,
+        timeLimitSec: state.settings.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+      };
     },
 
     // Parent changed settings while a session is suspended: apply them from the
@@ -1032,21 +1170,33 @@
       return state.active.settingsSnapshot;
     },
 
-    // One parking slot: a suspended session of the OTHER mode waits in
-    // state.parked while the child plays this one, and comes back when it ends.
+    // Parking for three modes (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4, with
+    // `tetris` -> `wall`): up to MAX_PARKED_SESSIONS suspended sessions, each
+    // of a mode different from every other parked session and from the
+    // active one, wait in `state.parkedSessions` (LIFO: the array is a
+    // stack — push on park, pop-from-the-end on unpark) while the child
+    // plays the active one.
     park: function (state) {
       if (!state.active) return null;
-      if (state.parked) throw Object.assign(new Error("parking slot occupied"), { code: "PARKED_EXISTS" });
+      if (!Array.isArray(state.parkedSessions)) state.parkedSessions = [];
+      if (state.parkedSessions.length >= MAX_PARKED_SESSIONS) {
+        throw Object.assign(new Error("parking slots full"), { code: "PARKED_FULL" });
+      }
+      var activeMode = state.active.mode || "typed";
+      if (state.parkedSessions.some(function (p) { return (p.mode || "typed") === activeMode; })) {
+        throw Object.assign(new Error("a session of this mode is already parked"), { code: "PARKED_DUPLICATE_MODE" });
+      }
       SessionCore.deferCurrent(state); // a parked session holds no in-flight question
-      state.parked = state.active;
+      state.parkedSessions.push(state.active);
       state.active = null;
-      return state.parked;
+      return state.parkedSessions[state.parkedSessions.length - 1];
     },
 
+    // Unparks the MOST RECENTLY parked session (LIFO), only when nothing is active.
     unpark: function (state) {
-      if (state.active || !state.parked) return null;
-      state.active = state.parked;
-      state.parked = null;
+      if (state.active) return null;
+      if (!Array.isArray(state.parkedSessions) || state.parkedSessions.length === 0) return null;
+      state.active = state.parkedSessions.pop();
       SessionCore.deferCurrent(state); // the question it was on comes back later with a fresh clock
       return state.active;
     },
@@ -1054,22 +1204,37 @@
     // Makes `mode` the active session: resumes it if it is active or parked,
     // otherwise parks the current session (if any) and starts a new one.
     switchTo: function (state, mode, rng, now) {
-      mode = mode === "falling" ? "falling" : "typed";
+      mode = normalizeMode(mode);
       if (state.active && (state.active.mode || "typed") === mode) {
         SessionCore.refreshSettings(state);
         return state.active;
       }
-      if (state.parked && (state.parked.mode || "typed") === mode) {
+      if (Array.isArray(state.parkedSessions) && state.parkedSessions.some(function (p) { return (p.mode || "typed") === mode; })) {
+        // Swap: pull the target OUT of parkedSessions first, THEN park the
+        // outgoing active session — in that order, so swapping between two
+        // already-parked-adjacent modes never trips the MAX_PARKED_SESSIONS
+        // capacity check (both slots can be full right up until this swap).
+        var idx = -1;
+        for (var pi = state.parkedSessions.length - 1; pi >= 0; pi--) {
+          if ((state.parkedSessions[pi].mode || "typed") === mode) { idx = pi; break; }
+        }
+        var incoming = state.parkedSessions.splice(idx, 1)[0];
         var outgoing = state.active;
-        state.active = state.parked;
-        state.parked = outgoing;
-        SessionCore.deferCurrent(state);
+        if (outgoing) {
+          SessionCore.deferCurrent(state); // outgoing holds no in-flight question while parked
+          state.parkedSessions.push(outgoing);
+        }
+        state.active = incoming;
+        SessionCore.deferCurrent(state); // the question the incoming session was on comes back later with a fresh clock
         SessionCore.refreshSettings(state);
         return state.active;
       }
-      // A NEW falling session only when the parent has the mode enabled; a parked
-      // one stays resumable above so it can always be finished (review 2026-08-28 #1).
-      if (mode === "falling" && !(state.settings.falling && state.settings.falling.enabled)) return SessionCore.switchTo(state, "typed", rng, now); // re-dispatch so a parked typed session is resumed, not duplicated
+      // A NEW falling/wall session only when the parent has that mode enabled;
+      // a parked one stays resumable above so it can always be finished
+      // (review 2026-08-28 #1). Re-dispatch to typed so a parked typed
+      // session is resumed, not duplicated.
+      if (mode === "falling" && !(state.settings.falling && state.settings.falling.enabled)) return SessionCore.switchTo(state, "typed", rng, now);
+      if (mode === "wall" && !(state.settings.wall && state.settings.wall.enabled)) return SessionCore.switchTo(state, "typed", rng, now);
       if (state.active) SessionCore.park(state);
       return SessionCore.start(state, rng, now, { mode: mode });
     },
@@ -1089,7 +1254,7 @@
         err.code = "ACTIVE_SESSION_EXISTS";
         throw err;
       }
-      var mode = opts && opts.mode === "falling" ? "falling" : "typed";
+      var mode = normalizeMode(opts && opts.mode);
       var size = SessionCore.resolveSessionSize(state);
       var planned = Selector.plan(state, rng, now, size);
       var carryoverTaken = planned.carryoverTaken || [];
@@ -1107,6 +1272,13 @@
         deferred: [],
         carryoverTaken: carryoverTaken.slice(),
       };
+      // docs/WALL-DESIGN.md §1 "State": active.wall = { grid, x, wallsBuilt }.
+      // `x` seeds at a centred column (recentred by the UI on every paint, per
+      // the deferred-piece re-centre rule); the reducer's own clamp keeps it
+      // in bounds regardless.
+      if (mode === "wall") {
+        active.wall = { grid: Wall.emptyGrid(CONFIG.WALL.ROWS, CONFIG.WALL.COLS), x: Math.floor(CONFIG.WALL.COLS / 2), wallsBuilt: 0 };
+      }
       state.active = active;
       return active;
     },
@@ -1238,6 +1410,23 @@
       }
       active.current = null;
 
+      // docs/WALL-DESIGN.md §1: the pure Wall reducer runs inside this SAME
+      // mutation (one save per submit, exactly like the ledger/facts writes
+      // above). Cell colour: 1 first-attempt correct, 2 wrong (grey — the
+      // FIRST, missed attempt), 3 retry (light — the re-ask, regardless of
+      // its own outcome; I1: retries never pay and are visually tainted).
+      var wallReset = false;
+      var wallsBuilt = active.wall ? active.wall.wallsBuilt : undefined;
+      if (active.mode === "wall" && active.wall) {
+        var parts = Facts.parts(current.asked);
+        var cell = current.retry ? 3 : (ok ? 1 : 2);
+        var x = opts && typeof opts.x === "number" ? opts.x : active.wall.x;
+        var stepResult = Wall.step(active.wall, { x: x, w: parts[0], h: parts[1], cell: cell });
+        active.wall = { grid: stepResult.grid, x: stepResult.x, wallsBuilt: stepResult.wallsBuilt };
+        wallReset = stepResult.reset;
+        wallsBuilt = stepResult.wallsBuilt;
+      }
+
       return {
         ok: ok,
         coins: attemptRecord.coins,
@@ -1246,6 +1435,8 @@
         interrupted: attemptRecord.interrupted,
         retry: attemptRecord.retry,
         withinLimit: attemptRecord.withinLimit,
+        wallReset: wallReset,
+        wallsBuilt: wallsBuilt,
       };
     },
 
@@ -1398,9 +1589,9 @@
     // shrunk/blank chart.
     trends: function (state, n) {
       var sessions = state.sessions.slice(-n);
-      var modeKeys = ["typed", "falling", "tetris"];
-      var accuracy = { typed: [], falling: [], tetris: [] };
-      var avgMs = { typed: [], falling: [], tetris: [] };
+      var modeKeys = ["typed", "falling", "wall"];
+      var accuracy = { typed: [], falling: [], wall: [] };
+      var avgMs = { typed: [], falling: [], wall: [] };
       var modes = sessions.map(function (s) { return s.mode || "typed"; });
       sessions.forEach(function (s) {
         var mode = s.mode || "typed";
@@ -1531,6 +1722,19 @@
     if (typeof asked !== "string" || !DIRECTIONAL_RE.test(asked)) return null;
     var p = Facts.parts(asked);
     return Facts.key(p[0], p[1]);
+  }
+
+  // F5 (closing review 2026-08-29, package 4): `canonicalOf`/DIRECTIONAL_RE
+  // check SHAPE ("7x2") but never the numeric RANGE — a crafted "20x3" passes
+  // both yet is not a real fact; queue/planned/retryQueue/deferred entries
+  // reaching SessionCore.paint/Wall.step with such a value produce an
+  // oversized piece (`w`/`h` outside 1..10) that core.js's own Wall
+  // reducer/journal contract never anticipated. validateImport uses this
+  // (in addition to canonicalOf's shape check elsewhere) to reject it up front.
+  function directionalInBounds(s) {
+    if (typeof s !== "string" || !DIRECTIONAL_RE.test(s)) return false;
+    var p = Facts.parts(s);
+    return p[0] >= CONFIG.FACTS_MIN && p[0] <= CONFIG.FACTS_MAX && p[1] >= CONFIG.FACTS_MIN && p[1] <= CONFIG.FACTS_MAX;
   }
 
   function multisetEqual(a, b) {
@@ -1682,6 +1886,13 @@
           durationSec: rs.falling && typeof rs.falling.durationSec === "number" ? rs.falling.durationSec : CONFIG.FALLING.DEFAULT_DURATION_SEC,
           options: rs.falling && typeof rs.falling.options === "number" ? rs.falling.options : CONFIG.FALLING.DEFAULT_OPTIONS,
         },
+        // "בונים קיר" build-the-wall mode (docs/WALL-DESIGN.md §1, package 4).
+        // Additive; ships disabled by default — old backups default to off.
+        wall: {
+          enabled: !!(rs.wall && rs.wall.enabled),
+          durationSec: rs.wall && typeof rs.wall.durationSec === "number" ? rs.wall.durationSec : CONFIG.WALL.DEFAULT_DURATION_SEC,
+          options: rs.wall && typeof rs.wall.options === "number" ? rs.wall.options : CONFIG.WALL.DEFAULT_OPTIONS,
+        },
         // Session size slider (V2-DESIGN §3.3). Additive since this batch; old
         // backups default to CONFIG.SESSION_SIZE_DEFAULT, clamped into bounds.
         sessionSize: (function () {
@@ -1704,7 +1915,10 @@
         sessions: [],
         carryover: [],
         active: null,
-        parked: null,
+        // schemaVersion 3 (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4): an array
+        // of up to MAX_PARKED_SESSIONS suspended journals, replacing the old
+        // single `parked` object so a second mode can be parked at once.
+        parkedSessions: [],
         map: { reached: {} },
         // schemaVersion 2 (V2-DESIGN B2a-4). `evidenceRebuild` is null until the
         // one-time rebuild guard has run (see Migrate.rebuildEvidence).
@@ -1742,13 +1956,21 @@
         facts: raw.facts ? JSON.parse(JSON.stringify(raw.facts)) : {},
         sessions: Array.isArray(raw.sessions)
           ? JSON.parse(JSON.stringify(raw.sessions)).map(function (s) {
-              s.mode = s.mode === "falling" ? "falling" : "typed";
+              s.mode = normalizeMode(s.mode);
               return s;
             })
           : [],
         carryover: Array.isArray(raw.carryover) ? raw.carryover.slice() : [],
         active: raw.active ? JSON.parse(JSON.stringify(raw.active)) : null,
-        parked: raw.parked ? JSON.parse(JSON.stringify(raw.parked)) : null, // additive 2026-08-28 (one parked session of the other mode)
+        // Schema 2 -> 3 (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4, package 4):
+        // the old single `raw.parked` object becomes a one-item array; a
+        // schema-3 `raw.parkedSessions` array is deep-cloned as-is (capped at
+        // MAX_PARKED_SESSIONS — an older/foreign export cannot smuggle more
+        // than the UI could ever create). `raw.parked` is never carried
+        // forward as its own field past this point.
+        parkedSessions: Array.isArray(raw.parkedSessions) && raw.parkedSessions.length > 0
+          ? JSON.parse(JSON.stringify(raw.parkedSessions)).slice(0, MAX_PARKED_SESSIONS)
+          : (raw.parked ? [JSON.parse(JSON.stringify(raw.parked))] : []),
         // Additive since 2026-08-27 (journey map); schemaVersion unchanged — old backups default to no stations.
         map: { reached: raw.map && raw.map.reached && typeof raw.map.reached === "object" ? JSON.parse(JSON.stringify(raw.map.reached)) : {} },
         // Schema 1 -> 2 (V2-DESIGN B2a-4): add meta.evidenceRebuild, never
@@ -1759,11 +1981,14 @@
       // in-flight question is deferred to the end of its queue and re-asked
       // fresh later (DESIGN §6, amended 2026-08-28; replaces the "interrupted" rule).
       if (state.active && state.active.current) SessionCore.deferCurrent({ active: state.active });
-      if (state.parked && state.parked.current) SessionCore.deferCurrent({ active: state.parked });
+      state.parkedSessions.forEach(function (p) {
+        if (p && p.current) SessionCore.deferCurrent({ active: p });
+        if (p && !Array.isArray(p.deferred)) p.deferred = [];
+        if (p) p.mode = normalizeMode(p.mode);
+      });
       if (state.active && !Array.isArray(state.active.deferred)) state.active.deferred = [];
-      if (state.parked && !Array.isArray(state.parked.deferred)) state.parked.deferred = [];
       if (state.active) {
-        state.active.mode = state.active.mode === "falling" ? "falling" : "typed";
+        state.active.mode = normalizeMode(state.active.mode);
       }
       return state;
     },
@@ -1890,6 +2115,20 @@
             }
           }
         }
+        if (raw.settings.wall !== undefined) {
+          var rw = raw.settings.wall;
+          if (!rw || typeof rw !== "object" || Array.isArray(rw)) {
+            problems.push("settings.wall must be an object");
+          } else {
+            if (rw.enabled !== undefined && typeof rw.enabled !== "boolean") problems.push("settings.wall.enabled must be a boolean");
+            if (rw.durationSec !== undefined && (typeof rw.durationSec !== "number" || rw.durationSec < CONFIG.WALL.MIN_DURATION_SEC || rw.durationSec > CONFIG.WALL.MAX_DURATION_SEC)) {
+              problems.push("settings.wall.durationSec out of range");
+            }
+            if (rw.options !== undefined && (typeof rw.options !== "number" || rw.options < CONFIG.WALL.MIN_OPTIONS || rw.options > CONFIG.WALL.MAX_OPTIONS)) {
+              problems.push("settings.wall.options out of range");
+            }
+          }
+        }
         // Session size slider (V2-DESIGN §3.3) — same bounded-number pattern as falling.
         if (raw.settings.sessionSize !== undefined &&
             (typeof raw.settings.sessionSize !== "number" || raw.settings.sessionSize < CONFIG.SESSION_SIZE_MIN || raw.settings.sessionSize > CONFIG.SESSION_SIZE_MAX)) {
@@ -1909,19 +2148,43 @@
           });
         }
       }
-      [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
+      // Schema <= 3, both shapes (docs/WALL-DESIGN.md §1 / V2-DESIGN §4.4):
+      // an older-format backup carries a single `raw.parked` object; a
+      // schema-3 backup carries `raw.parkedSessions` (array, at most
+      // MAX_PARKED_SESSIONS). Never both at once (ambiguous — reject).
+      var parkedPairs = [];
+      if (raw.parkedSessions !== undefined && raw.parked !== undefined) {
+        problems.push("parked and parkedSessions must not both be present");
+      } else if (Array.isArray(raw.parkedSessions)) {
+        if (raw.parkedSessions.length > MAX_PARKED_SESSIONS) {
+          problems.push("parkedSessions must have at most " + MAX_PARKED_SESSIONS + " entries");
+        }
+        raw.parkedSessions.forEach(function (p, i) { parkedPairs.push(["parkedSessions[" + i + "]", p]); });
+      } else if (raw.parkedSessions !== undefined) {
+        problems.push("parkedSessions must be an array");
+      } else if (raw.parked !== undefined) {
+        parkedPairs.push(["parked", raw.parked]);
+      }
+      var journalPairs = [["active", raw.active]].concat(parkedPairs);
+
+      journalPairs.forEach(function (pair) {
         var name = pair[0], val = pair[1];
         if (val === undefined || val === null) return;
         if (typeof val !== "object" || Array.isArray(val)) { problems.push(name + " must be an object or null"); return; }
         if (!Array.isArray(val.planned)) problems.push(name + ".planned must be an array");
+        else if (!val.planned.every(directionalInBounds)) problems.push(name + ".planned entries must be like \"7x2\" with both parts in " + CONFIG.FACTS_MIN + ".." + CONFIG.FACTS_MAX);
         if (!Array.isArray(val.queue)) problems.push(name + ".queue must be an array");
+        else if (!val.queue.every(directionalInBounds)) problems.push(name + ".queue entries must be like \"7x2\" with both parts in " + CONFIG.FACTS_MIN + ".." + CONFIG.FACTS_MAX);
         if (!Array.isArray(val.retryQueue)) problems.push(name + ".retryQueue must be an array");
+        else if (!val.retryQueue.every(directionalInBounds)) problems.push(name + ".retryQueue entries must be like \"7x2\" with both parts in " + CONFIG.FACTS_MIN + ".." + CONFIG.FACTS_MAX);
         if (!Array.isArray(val.attempts)) problems.push(name + ".attempts must be an array");
         if (val.deferred !== undefined && !Array.isArray(val.deferred)) problems.push(name + ".deferred must be an array");
+        else if (Array.isArray(val.deferred) && !val.deferred.every(directionalInBounds)) problems.push(name + ".deferred entries must be like \"7x2\" with both parts in " + CONFIG.FACTS_MIN + ".." + CONFIG.FACTS_MAX);
         // Additive V2-DESIGN §3.3 field; absent = legacy journal (computeNextCarryover falls back).
         if (val.carryoverTaken !== undefined && !Array.isArray(val.carryoverTaken)) problems.push(name + ".carryoverTaken must be an array");
+        if (val.mode !== undefined && GAME_MODES.indexOf(val.mode) === -1) problems.push(name + ".mode must be one of " + GAME_MODES.join("/"));
       });
-      [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
+      journalPairs.forEach(function (pair) {
         var name = pair[0], a = pair[1];
         if (!a || typeof a !== "object" || Array.isArray(a)) return;
         if (typeof a.id !== "string" || !a.id) problems.push(name + ".id must be a non-empty string");
@@ -1934,10 +2197,49 @@
             if (typeof c.shownAt !== "number") problems.push(name + ".current.shownAt must be a number");
           }
         }
+        // docs/WALL-DESIGN.md §1 wall journal contract: wall.grid = ROWS
+        // arrays of COLS cells ∈ {0,1,2,3}; wallsBuilt >= 0; 0 <= x <=
+        // COLS-w and 1 <= w,h <= 10 where w/h are the CURRENT question's
+        // asked dimensions (not persisted on the journal itself — see
+        // core.js Wall.step's doc comment) when a current question exists.
+        if ((a.mode || "typed") === "wall") {
+          var w2 = a.wall;
+          if (!w2 || typeof w2 !== "object" || Array.isArray(w2)) {
+            problems.push(name + ".wall must be an object for a wall-mode journal");
+          } else {
+            if (!Array.isArray(w2.grid) || w2.grid.length !== CONFIG.WALL.ROWS) {
+              problems.push(name + ".wall.grid must have " + CONFIG.WALL.ROWS + " rows");
+            } else {
+              w2.grid.forEach(function (row, ri) {
+                if (!Array.isArray(row) || row.length !== CONFIG.WALL.COLS) {
+                  problems.push(name + ".wall.grid[" + ri + "] must have " + CONFIG.WALL.COLS + " cells");
+                } else if (!row.every(function (cell) { return [0, 1, 2, 3].indexOf(cell) !== -1; })) {
+                  problems.push(name + ".wall.grid[" + ri + "] cells must be 0/1/2/3");
+                }
+              });
+            }
+            if (typeof w2.wallsBuilt !== "number" || !isFinite(w2.wallsBuilt) || w2.wallsBuilt < 0) {
+              problems.push(name + ".wall.wallsBuilt must be a non-negative number");
+            }
+            if (typeof w2.x !== "number" || !isFinite(w2.x) || w2.x < 0 || w2.x >= CONFIG.WALL.COLS) {
+              problems.push(name + ".wall.x out of range");
+            } else if (a.current && typeof a.current.asked === "string" && /^\d+x\d+$/.test(a.current.asked)) {
+              var wp = Facts.parts(a.current.asked);
+              var pw = wp[0], ph = wp[1];
+              if (pw < 1 || pw > 10 || ph < 1 || ph > 10) problems.push(name + ".wall piece dimensions out of range");
+              if (w2.x > CONFIG.WALL.COLS - pw) problems.push(name + ".wall.x out of range for the current piece width");
+            }
+          }
+        }
       });
-      if (raw.active && raw.parked && typeof raw.active === "object" && typeof raw.parked === "object" && (raw.active.mode || "typed") === (raw.parked.mode || "typed")) {
-        problems.push("active and parked must be different modes");
-      }
+      var allModes = [];
+      if (raw.active && typeof raw.active === "object") allModes.push(raw.active.mode || "typed");
+      parkedPairs.forEach(function (pair) { if (pair[1] && typeof pair[1] === "object") allModes.push(pair[1].mode || "typed"); });
+      var seenModes = {};
+      allModes.forEach(function (m) {
+        if (seenModes[m]) problems.push("active/parked sessions must all be different modes");
+        seenModes[m] = true;
+      });
       return { ok: problems.length === 0, problems: problems };
     },
 
@@ -1978,8 +2280,9 @@
         var activeReason = journalEvidenceProblem(state.active);
         if (activeReason) return { ok: false, reason: activeReason };
       }
-      if (state.parked) {
-        var parkedReason = journalEvidenceProblem(state.parked);
+      var parkedList = Array.isArray(state.parkedSessions) ? state.parkedSessions : [];
+      for (var j = 0; j < parkedList.length; j++) {
+        var parkedReason = journalEvidenceProblem(parkedList[j]);
         if (parkedReason) return { ok: false, reason: parkedReason };
       }
       return { ok: true };
@@ -2010,7 +2313,7 @@
       });
       var journals = [];
       if (state.active) journals.push(state.active);
-      if (state.parked) journals.push(state.parked);
+      (Array.isArray(state.parkedSessions) ? state.parkedSessions : []).forEach(function (p) { journals.push(p); });
       journals.forEach(function (journ) {
         (journ.attempts || []).filter(function (a) { return !a.retry; }).forEach(function (a) {
           timeline.push({ a: a, sIdx: Infinity, k: a.t });
@@ -2591,6 +2894,7 @@
     Selector: Selector,
     Map: Map,
     Falling: Falling,
+    Wall: Wall,
     Cloud: Cloud,
     SessionCore: SessionCore,
     Storage: Storage,

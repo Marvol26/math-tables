@@ -72,7 +72,7 @@ test("trends() returns parallel arrays for the last n sessions; per-mode accurac
   assert.equal(trends.accuracy.typed.length, 1);
   assert.equal(trends.accuracy.typed[0], 0.9);
   assert.deepEqual(trends.accuracy.falling, [null]);
-  assert.deepEqual(trends.accuracy.tetris, [null]);
+  assert.deepEqual(trends.accuracy.wall, [null]);
   assert.equal(trends.coins[0], 20);
   assert.equal(trends.masteredCount[0], 1);
   assert.deepEqual(trends.modes, ["typed"]);

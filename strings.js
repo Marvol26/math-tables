@@ -11,6 +11,8 @@ window.MathText = (function () {
       resumeCta: "ממשיכות!",
       resumeFallingCta: "ממשיכות! 🎈",
       fallingBtn: "מספרים נופלים 🎈",
+      resumeWallCta: "ממשיכות! 🧱",
+      wallBtn: "בונים קיר 🧱",
       greeting: function (name) { return "היי, " + name + "!"; },
       mapBtn: "המפה שלי 🗺️",
       mapStatus: function (table, progress, required) { return "🐢 את בתחנה " + tableTag(table) + " · " + bdi(progress + "/" + required); },
@@ -105,6 +107,8 @@ window.MathText = (function () {
       perfectSeriesSub: "שני סבבים מושלמים ברצף! מדהים!",
       perfectSeriesSub3: "שלושה סבבים מושלמים ברצף (או יותר)! אלופה!!!",
       seriesBonus: function (n) { return "בונוס סדרה " + bdi("+" + n) + " 🪙"; },
+      // docs/WALL-DESIGN.md §1 summary line, shown when n >= 1.
+      wallsBuilt: function (n) { return "קירות שבנית: " + bdi(n) + " 🧱"; },
     },
 
     map: {
@@ -220,6 +224,11 @@ window.MathText = (function () {
       fallingEnableLabel: "מספרים נופלים 🎈 — מצב נוסף",
       fallingDurationLabel: "זמן נפילה (שניות)",
       fallingOptionsLabel: "מספר בועות לבחירה",
+      // docs/WALL-DESIGN.md §1: same duration/options Hebrew as falling, a
+      // second mode's settings block.
+      wallEnableLabel: "בונים קיר 🧱 — מצב נוסף",
+      wallDurationLabel: "זמן נפילה (שניות)",
+      wallOptionsLabel: "מספר בועות לבחירה",
       sessionSizeLabel: "מספר תרגילים בסבב",
       changePinBtn: "שינוי קוד",
       saveSettingsBtn: "שמירה",
@@ -256,7 +265,7 @@ window.MathText = (function () {
       trendCoins: "מטבעות לסבב",
       heatmapTitle: "מפת חום — כל העובדות",
       heatmapLegend: "ירוק = נלמד לגמרי · צהוב = בלמידה (70%+) · כתום = בלמידה (מתחת ל-70%) · אפור = עוד לא ניסתה",
-      modeNames: { typed: "מקלדת ⌨️", falling: "בלונים 🎈", tetris: "מלבנים 🧱" },
+      modeNames: { typed: "מקלדת ⌨️", falling: "בלונים 🎈", wall: "קיר 🧱" },
       modeLegend: "קו לכל מצב משחק",
       weakestTitle: "8 העובדות הכי קשות",
       historyTitle: "היסטוריית סבבים",
@@ -330,6 +339,11 @@ window.MathText = (function () {
     misc: {
       updateAvailable: "יש גרסה חדשה — רענני",
       reloadBtn: "רענני",
+    },
+
+    // docs/WALL-DESIGN.md §1 — "בונים קיר" build-the-wall mode.
+    wall: {
+      full: "הקיר התמלא! בונות קיר חדש 🧱🎉",
     },
   };
 
