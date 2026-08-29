@@ -27,7 +27,7 @@ test("plan() never contains duplicate canonical keys", () => {
     const planned = Selector.plan(state, seededRng(seed), 1000);
     const keys = keysOf(planned);
     assert.equal(new Set(keys).size, keys.length);
-    assert.equal(planned.length, CONFIG.SESSION_SIZE);
+    assert.equal(planned.length, CONFIG.SESSION_SIZE_DEFAULT);
   }
 });
 

@@ -131,6 +131,14 @@ test("forImport() drops pinHash/recoveryHash so a caller must re-apply the devic
   assert.equal(bootState.settings.pinHash, "abc");
 });
 
+test("[V2-DESIGN §3.4] migrate() canonicalises economy.unlocked across BOTH 24-id albums: dedups, drops unknown ids, keeps order, accepts album-2 ids", () => {
+  const raw = sampleRaw();
+  raw.economy.unlocked = ["cat", "cat", "not-a-real-sticker", "dog", "rocket", "rocket", "crown"];
+  const state = Migrate.migrate(raw);
+  assert.deepEqual(state.economy.unlocked, ["cat", "dog", "rocket", "crown"]);
+  assert.ok(CONFIG.STICKERS.includes("rocket") && CONFIG.STICKERS.includes("crown"), "album-2 ids are known stickers");
+});
+
 test("recompute() self-heals a missing unlock implied by the ledger", () => {
   const state = Migrate.emptyState();
   Economy.ledgerAppend(state, { id: "l_1", t: 1, type: "earn", amount: 60, ref: "s1", note: "" });

@@ -88,6 +88,134 @@ test("[S3-4] falling mode renders one .bubble per configured option, sized to se
   assert.equal(window.document.querySelector('[data-screen="question"]').getAttribute("data-falling"), "1");
 });
 
+test("[1-2] collection screen: unlocked stickers show name+nick and NO title attribute; locked stickers show \"?\" with no title (no id leak); a golden+unlocked sticker gets the golden class", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  await completeParentSetup(window);
+  const CONFIG = window.MathCore.CONFIG;
+  const cat = CONFIG.ALBUMS[0].stickers[0]; // "cat" — MAP_PATH[0] is table 1, so this is also the first golden candidate
+  await window.App.storage.save(function (s) {
+    s.economy.unlocked = [cat];
+    s.map = { reached: {} };
+    s.map.reached[CONFIG.MAP_PATH[0]] = 1; // gilds the first album-1 sticker (cat)
+  }, Date.now());
+
+  window.location.hash = "#screen=collection";
+  await flush(5);
+  assert.equal(currentScreen(window), "collection");
+
+  const stickers = Array.from(window.document.querySelectorAll(".sticker"));
+  assert.equal(stickers.length, CONFIG.STICKERS.length, "one .sticker element per sticker across both albums");
+  stickers.forEach((el) => {
+    assert.equal(el.getAttribute("title"), null, "no .sticker element may carry a title attribute (id leak)");
+  });
+
+  const unlocked = window.document.querySelectorAll(".sticker.unlocked");
+  assert.equal(unlocked.length, 1);
+  assert.equal(unlocked[0].textContent.indexOf(window.MathText.T.stickers[cat].name) !== -1, true, "unlocked sticker shows its name");
+  assert.equal(unlocked[0].textContent.indexOf(window.MathText.T.stickers[cat].nick) !== -1, true, "unlocked sticker shows its nick");
+  assert.ok(unlocked[0].classList.contains("golden"), "the unlocked, map-gilded sticker gets the golden class");
+
+  const locked = Array.from(stickers).filter((el) => !el.classList.contains("unlocked"));
+  assert.equal(locked.length, CONFIG.STICKERS.length - 1);
+  locked.forEach((el) => assert.equal(el.textContent.trim(), "?"));
+});
+
+test("[1-4/F4] summary stars + near-perfect title scale with session size (16/20, 15/20, 19/20, 20/20) — package-1 closing review finding F4", async () => {
+  const window = await bootApp();
+  await completeParentSetup(window);
+  const CONFIG = window.MathCore.CONFIG;
+
+  function renderFakeSummary(firstTryCorrect, plannedLength) {
+    const planned = [];
+    for (let i = 0; i < plannedLength; i++) planned.push("1x1");
+    window.App.lastSessionResult = {
+      id: "s_f4_" + firstTryCorrect + "_" + plannedLength + "_" + Date.now(),
+      mode: "typed",
+      planned,
+      firstTryCorrect,
+      misses: [],
+      perfect: firstTryCorrect === plannedLength,
+      perfectSeries: firstTryCorrect === plannedLength ? 1 : 0,
+      coinsEarned: 10,
+      unlocksEarned: [],
+      stationsReached: [],
+      totalMs: 1000,
+    };
+    window.location.hash = "#screen=home";
+  }
+
+  function starCount(win) {
+    return win.document.querySelector(".stars").textContent.trim().length;
+  }
+
+  // 16/20 = exactly CONFIG.STARS_TWO_RATIO (0.8) -> 2 stars (boundary, inclusive).
+  renderFakeSummary(16, 20);
+  window.location.hash = "#screen=summary";
+  await flush(5);
+  assert.equal(starCount(window), 2, "16/20 (ratio == STARS_TWO_RATIO) must be 2 stars");
+  assert.ok(!window.document.body.textContent.includes(window.MathText.T.summary.nearPerfectTitle), "16/20 is not near-perfect (2 misses, not exactly NEAR_PERFECT_MISSES)");
+
+  // 15/20 = below the ratio -> 1 star.
+  renderFakeSummary(15, 20);
+  window.location.hash = "#screen=summary";
+  await flush(5);
+  assert.equal(starCount(window), 1, "15/20 (below STARS_TWO_RATIO) must be 1 star");
+
+  // 19/20 = exactly planned.length - NEAR_PERFECT_MISSES -> near-perfect title, 2 stars (not perfect).
+  renderFakeSummary(19, 20);
+  window.location.hash = "#screen=summary";
+  await flush(5);
+  assert.equal(starCount(window), 2, "19/20 must be 2 stars (>= STARS_TWO_RATIO, not perfect)");
+  assert.ok(window.document.body.textContent.includes(window.MathText.T.summary.nearPerfectTitle), "19/20 (exactly NEAR_PERFECT_MISSES=1 miss out of 20) must show the near-perfect title");
+
+  // 20/20 = perfect -> 3 stars, perfect title, no near-perfect title.
+  renderFakeSummary(20, 20);
+  window.location.hash = "#screen=summary";
+  await flush(5);
+  assert.equal(starCount(window), 3, "20/20 must be 3 stars");
+  assert.ok(window.document.body.textContent.includes(window.MathText.T.summary.perfectTitle), "20/20 must show the perfect title");
+  assert.ok(!window.document.body.textContent.includes(window.MathText.T.summary.nearPerfectTitle), "a perfect round is not ALSO near-perfect");
+
+  assert.equal(CONFIG.STARS_TWO_RATIO, 0.8, "sanity: today's actual CONFIG value");
+  assert.equal(CONFIG.NEAR_PERFECT_MISSES, 1, "sanity: today's actual CONFIG value");
+});
+
+test("[1-3] spectators strip (V2-DESIGN §3.2): absent with zero unlocks; present and stable across re-renders once a sticker is unlocked, capped at AUDIENCE_MAX", async () => {
+  const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
+  await completeParentSetup(window);
+  const CONFIG = window.MathCore.CONFIG;
+
+  // No unlocks yet -> strip absent.
+  fireClick(window.document.querySelector('[data-action="play"]'));
+  await flush(10);
+  assert.equal(window.document.querySelector(".audience"), null, "no stickers unlocked -> no .audience strip");
+
+  // Unlock more than AUDIENCE_MAX stickers, re-render the SAME question twice.
+  await window.App.storage.save(function (s) {
+    s.economy.unlocked = window.MathCore.CONFIG.STICKERS.slice(0, 8);
+  }, Date.now());
+  const seedKey = window.App.storage.state.active.id;
+  // Re-render via the router (hash round-trip forces a fresh render of the same screen).
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=question";
+  await flush(5);
+
+  const first = window.document.querySelector(".audience");
+  assert.ok(first, "an unlocked sticker must produce the .audience strip");
+  const firstMembers = Array.from(first.children).map((el) => el.textContent);
+  assert.equal(firstMembers.length, CONFIG.AUDIENCE_MAX, "membership is capped at AUDIENCE_MAX");
+  assert.equal(window.App.storage.state.active.id, seedKey, "same session -> same seed key");
+
+  window.location.hash = "#screen=collection";
+  await flush(3);
+  window.location.hash = "#screen=question";
+  await flush(5);
+  const second = window.document.querySelector(".audience");
+  const secondMembers = Array.from(second.children).map((el) => el.textContent);
+  assert.deepEqual(secondMembers, firstMembers, "membership (order + identity) is stable across re-renders of the SAME session");
+});
+
 test("[S3-4] exit suspends the session (state.active survives) and Home's play button resumes the SAME question", async () => {
   const window = await bootApp({ mediaMatches: { "(pointer: coarse)": true } });
   await completeParentSetup(window);
@@ -235,6 +363,27 @@ test("[S3-F U7] the parent settings falling-options <select> renders exactly CON
   for (let n = window.MathCore.CONFIG.FALLING.MIN_OPTIONS; n <= window.MathCore.CONFIG.FALLING.MAX_OPTIONS; n++) expected.push(n);
   assert.deepEqual(values, expected);
   assert.deepEqual(expected, [4, 5, 6], "sanity: today's actual CONFIG range");
+});
+
+test("[1-4] parent settings session-size slider renders CONFIG bounds and persists the choice into settings.sessionSize", async () => {
+  const window = await bootApp();
+  await completeParentSetup(window);
+  window.App.parentUnlocked = true;
+  window.location.hash = "#screen=parent";
+  await flush(5);
+  assert.equal(currentScreen(window), "parent-dashboard");
+
+  const CONFIG = window.MathCore.CONFIG;
+  const slider = window.document.getElementById("set-session-size");
+  assert.ok(slider, "the session-size slider must be present");
+  assert.equal(Number(slider.getAttribute("min")), CONFIG.SESSION_SIZE_MIN);
+  assert.equal(Number(slider.getAttribute("max")), CONFIG.SESSION_SIZE_MAX);
+  assert.equal(Number(slider.getAttribute("value")), CONFIG.SESSION_SIZE_DEFAULT, "default sessionSize is CONFIG.SESSION_SIZE_DEFAULT");
+
+  slider.setAttribute("value", String(CONFIG.SESSION_SIZE_MAX));
+  fireClick(window.document.querySelector('[data-action="save-settings"]'));
+  await flush(5);
+  assert.equal(window.App.storage.state.settings.sessionSize, CONFIG.SESSION_SIZE_MAX, "save-settings must persist the slider's value");
 });
 
 test("[S3-F U8] after a wrong first attempt, the question screen shows a .dot.retry for that fact", async () => {

@@ -33,6 +33,30 @@ function playPerfectSession(state, rng, startAt) {
   return SessionCore.finish(state, t + 1);
 }
 
+// Drives a full session, missing exactly `missCount` distinct facts on their
+// first attempt (retried correctly afterward) — for V2-DESIGN §3.3 near-perfect
+// / stars fixtures that need an exact firstTryCorrect count independent of size.
+function playSessionWithMisses(state, rng, startAt, missCount) {
+  SessionCore.start(state, rng, startAt);
+  let t = startAt;
+  let missesLeft = missCount;
+  const missedAlready = new Set();
+  while (state.active.queue.length > 0 || state.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(state, t);
+    if (!current) break;
+    t += 100;
+    const correctAnswer = Facts.answer(current.asked);
+    let answer = correctAnswer;
+    if (!current.retry && missesLeft > 0 && !missedAlready.has(current.asked)) {
+      missedAlready.add(current.asked);
+      missesLeft--;
+      answer = correctAnswer + 1; // wrong on the first attempt only
+    }
+    SessionCore.submit(state, answer, t, {});
+  }
+  return SessionCore.finish(state, t + 1);
+}
+
 test("a perfect session: 10/10, perfect=true, one earn entry + one perfect entry", () => {
   const state = freshState();
   const session = playPerfectSession(state, seededRng(1), 1000);
@@ -463,4 +487,114 @@ test("[S3-F M8] finish() unlocks a sticker whose threshold is crossed by THIS se
   assert.ok(20 + session.coinsEarned >= CONFIG.UNLOCK_BASE, "this fixture must actually cross unlockThreshold(1) this session");
   assert.deepEqual(session.unlocksEarned, [CONFIG.STICKERS[0]]);
   assert.ok(state.economy.unlocked.includes(CONFIG.STICKERS[0]));
+});
+
+// --------------------------------------------------------------------
+// V2-DESIGN §3.3 — session size 10-20 (immutable per-plan)
+// --------------------------------------------------------------------
+
+test("[V2-DESIGN §3.3] settings.sessionSize is read ONCE at start(): active.planned.length reflects it, and stays fixed even if settings change mid-session", () => {
+  const state = freshState();
+  state.settings.sessionSize = 20;
+  SessionCore.start(state, seededRng(30), 1000);
+  assert.equal(state.active.planned.length, 20);
+  assert.equal(state.active.queue.length, 20);
+  // Slider moved while this session is in flight: refreshSettings() must never touch planned.
+  state.settings.sessionSize = 10;
+  SessionCore.refreshSettings(state);
+  assert.equal(state.active.planned.length, 20, "active.planned.length is the only denominator, fixed at start()");
+});
+
+test("[V2-DESIGN §3.3] default sessionSize (absent from settings) is CONFIG.SESSION_SIZE_DEFAULT = 10", () => {
+  const state = freshState();
+  delete state.settings.sessionSize;
+  SessionCore.start(state, seededRng(31), 1000);
+  assert.equal(state.active.planned.length, CONFIG.SESSION_SIZE_DEFAULT);
+  assert.equal(CONFIG.SESSION_SIZE_DEFAULT, 10);
+});
+
+test("[V2-DESIGN §3.3] resolveSessionSize clamps out-of-bounds/garbage values into [MIN, MAX]", () => {
+  const tooBig = freshState(); tooBig.settings.sessionSize = 999;
+  assert.equal(SessionCore.resolveSessionSize(tooBig), CONFIG.SESSION_SIZE_MAX);
+  const tooSmall = freshState(); tooSmall.settings.sessionSize = 1;
+  assert.equal(SessionCore.resolveSessionSize(tooSmall), CONFIG.SESSION_SIZE_MIN);
+  const garbage = freshState(); garbage.settings.sessionSize = "twenty";
+  assert.equal(SessionCore.resolveSessionSize(garbage), CONFIG.SESSION_SIZE_DEFAULT);
+});
+
+test("[V2-DESIGN §3.3] 9/10 and 19/20 (exactly NEAR_PERFECT_MISSES=1 miss) earn the near-perfect bonus; 8/10 and 16/20 do not", () => {
+  const s10miss1 = freshState();
+  const r10miss1 = playSessionWithMisses(s10miss1, seededRng(32), 1000, 1);
+  assert.equal(r10miss1.firstTryCorrect, 9);
+  assert.ok(s10miss1.economy.ledger.some((e) => e.note === "near-perfect"), "9/10 must mint the near-perfect bonus");
+
+  const s10miss2 = freshState();
+  const r10miss2 = playSessionWithMisses(s10miss2, seededRng(33), 1000, 2);
+  assert.equal(r10miss2.firstTryCorrect, 8);
+  assert.ok(!s10miss2.economy.ledger.some((e) => e.note === "near-perfect"), "8/10 must NOT mint the near-perfect bonus");
+
+  const s20miss1 = freshState(); s20miss1.settings.sessionSize = 20;
+  const r20miss1 = playSessionWithMisses(s20miss1, seededRng(34), 1000, 1);
+  assert.equal(r20miss1.firstTryCorrect, 19);
+  assert.equal(r20miss1.planned.length, 20);
+  assert.ok(s20miss1.economy.ledger.some((e) => e.note === "near-perfect"), "19/20 must mint the near-perfect bonus (scales with size)");
+
+  const s20miss4 = freshState(); s20miss4.settings.sessionSize = 20;
+  const r20miss4 = playSessionWithMisses(s20miss4, seededRng(35), 1000, 4);
+  assert.equal(r20miss4.firstTryCorrect, 16);
+  assert.ok(!s20miss4.economy.ledger.some((e) => e.note === "near-perfect"), "16/20 must NOT mint the near-perfect bonus");
+});
+
+test("[V2-DESIGN §3.3] carryover: leftover is computed by KEY (carryoverTaken), not by slicing at a fixed size — an old 10-question journal finishes correctly after the slider moves to 20, and vice versa", () => {
+  // Legacy journal: started before this batch, so no carryoverTaken field on
+  // state.active (simulates an in-flight session loaded from an old backup).
+  const legacy = freshState();
+  legacy.carryover = ["1x1", "1x2", "1x3"];
+  SessionCore.start(legacy, seededRng(36), 1000);
+  delete legacy.active.carryoverTaken; // simulate a pre-this-batch journal
+  let t = 1000;
+  while (legacy.active.queue.length > 0 || legacy.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(legacy, t);
+    if (!current) break;
+    t += 100;
+    // Miss every first attempt (so all facts become carryover candidates) but
+    // answer retries correctly, or the retry queue never drains.
+    const answer = current.retry ? Facts.answer(current.asked) : Facts.answer(current.asked) + 1;
+    SessionCore.submit(legacy, answer, t, {});
+  }
+  // legacy fallback = first planned.length (10) carryover keys "taken" -> since
+  // all 3 original carryover keys were <= 10 and got planned, leftover from
+  // state.carryover is empty; next carryover = this session's own misses.
+  const before = legacy.sessions.length;
+  SessionCore.finish(legacy, t + 1);
+  assert.equal(legacy.sessions.length, before + 1);
+  assert.ok(legacy.carryover.length > 0, "misses repopulate carryover even under the legacy fallback");
+
+  // Now the forward case: slider moved 10 -> 20 with real carryoverTaken recorded.
+  const grown = freshState();
+  grown.carryover = ["2x2", "2x3"];
+  grown.settings.sessionSize = 20;
+  SessionCore.start(grown, seededRng(37), 2000);
+  assert.deepEqual(grown.active.carryoverTaken.slice().sort(), ["2x2", "2x3"].sort());
+  let t2 = 2000;
+  while (grown.active.queue.length > 0 || grown.active.retryQueue.length > 0) {
+    const current = SessionCore.paint(grown, t2);
+    if (!current) break;
+    t2 += 100;
+    SessionCore.submit(grown, Facts.answer(current.asked), t2, {});
+  }
+  SessionCore.finish(grown, t2 + 1);
+  assert.deepEqual(grown.carryover, [], "fully-consumed, fully-correct carryover leaves nothing behind");
+});
+
+test("[V2-DESIGN §3.3] perfect-series continuity holds across different session sizes", () => {
+  const state = freshState();
+  const s1 = playPerfectSession(state, seededRng(38), 1000); // size 10 (default)
+  assert.equal(s1.perfectSeries, 1);
+  state.settings.sessionSize = 20;
+  const s2 = playPerfectSession(state, seededRng(39), 2000); // size 20
+  assert.equal(s2.perfectSeries, 2);
+  state.settings.sessionSize = 10;
+  const s3 = playPerfectSession(state, seededRng(40), 3000); // back to size 10
+  assert.equal(s3.perfectSeries, 3);
 });

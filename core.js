@@ -18,7 +18,6 @@
   var CONFIG = {
     FACTS_MIN: 1,
     FACTS_MAX: 10,
-    SESSION_SIZE: 10,
 
     // Economy
     TIER_VALUE: { 1: 1, 2: 2, 3: 3 }, // tier index -> coin value
@@ -38,7 +37,6 @@
     // The series counts across both game modes and across days; any non-perfect
     // round resets it. Replaces the "first perfect of the day only" cap (R1 #6).
     PERFECT_SERIES_EXTRA: [0, 5, 10],
-    NEAR_PERFECT_MIN_CORRECT: 9,
     NEAR_PERFECT_BONUS: 2,
 
     // Mastery / KPIs
@@ -51,16 +49,33 @@
     SPEED_CLAMP_MS: 30000,
     RECENT_WINDOW: 20,
 
-    // Collection / unlocks
-    UNLOCK_COUNT: 24,
+    // Collection / unlocks (V2-DESIGN §3.4: album 2 + golden stickers,
+    // "combine 1 and 2"). ALBUMS is the source of truth; STICKERS is the
+    // flattened list existing callers already index by 0-based position.
+    UNLOCK_COUNT: 48,
     UNLOCK_BASE: 25,
     UNLOCK_STEP: 5,
-    STICKERS: [
-      "cat", "dog", "fox", "owl", "bee", "frog",
-      "fish", "duck", "panda", "koala", "lion", "tiger",
-      "zebra", "giraffe", "elephant", "monkey", "rabbit", "hedgehog",
-      "turtle", "dolphin", "butterfly", "ladybug", "unicorn", "dragon",
+    ALBUMS: [
+      {
+        id: "animals",
+        stickers: [
+          "cat", "dog", "fox", "owl", "bee", "frog",
+          "fish", "duck", "panda", "koala", "lion", "tiger",
+          "zebra", "giraffe", "elephant", "monkey", "rabbit", "hedgehog",
+          "turtle", "dolphin", "butterfly", "ladybug", "unicorn", "dragon",
+        ],
+      },
+      {
+        id: "adventure",
+        stickers: [
+          "rocket", "ufo", "planet", "moon", "star", "rainbow",
+          "castle", "ferris", "carousel", "circus", "train", "helicopter",
+          "sailboat", "racecar", "tractor", "canoe", "volcano", "island",
+          "tent", "balloon", "kite", "compass", "map", "crown",
+        ],
+      },
     ],
+    STICKERS: null, // set right after CONFIG below (flattened ALBUMS, existing callers keep working)
 
     // Challenge mode
     DEFAULT_TIME_LIMIT_SEC: 10,
@@ -104,7 +119,30 @@
       // shownAt — 0.6s is negligible against an 8s fall.
       START_DELAY_MS: 600,
     },
+
+    // Spectators ("הקהל", V2-DESIGN §3.2). Zero layout impact by design.
+    AUDIENCE_MAX: 5,
+
+    // Session size (V2-DESIGN §3.3, immutable per-plan): read once at
+    // SessionCore.start(); active.planned.length is the only denominator
+    // afterwards.
+    SESSION_SIZE_DEFAULT: 10,
+    SESSION_SIZE_MIN: 10,
+    SESSION_SIZE_MAX: 20,
+
+    // Near-perfect = exactly this many misses (V2-DESIGN §3.3; replaces the
+    // old NEAR_PERFECT_MIN_CORRECT fixed-count-of-10 rule so it scales with
+    // session size).
+    NEAR_PERFECT_MISSES: 1,
+    // Stars: perfect -> 3, >= this ratio of firstTryCorrect/planned.length -> 2, else 1.
+    STARS_TWO_RATIO: 0.8,
   };
+
+  // Flattened sticker id list — existing callers (canonicalizeUnlocked,
+  // Economy.newUnlocks, the collection screen) index this by 0-based
+  // position; CONFIG.ALBUMS is the source of truth (V2-DESIGN §3.4).
+  CONFIG.STICKERS = [];
+  CONFIG.ALBUMS.forEach(function (album) { CONFIG.STICKERS.push.apply(CONFIG.STICKERS, album.stickers); });
 
   // --------------------------------------------------------------------
   // Facts
@@ -237,8 +275,21 @@
       return { lifetimeCoins: lifetimeCoins, balance: balance };
     },
 
+    // 1-based album-position curve: BASE·i + STEP·i(i-1)/2 (same shape as the
+    // original single-album formula).
+    unlockCurve: function (i) {
+      return CONFIG.UNLOCK_BASE * i + CONFIG.UNLOCK_STEP * i * (i - 1) / 2;
+    },
+
+    // Global index n (1-based) -> lifetime-coin threshold (V2-DESIGN §3.4).
+    // Each album restarts the curve; a full prior album adds a flat
+    // curve(albumSize) per album completed. Exact boundaries: n=24 -> 1980,
+    // n=25 -> 2005, n=48 -> 3960 (24-sticker albums, BASE=25, STEP=5).
     unlockThreshold: function (n) {
-      return CONFIG.UNLOCK_BASE * n + CONFIG.UNLOCK_STEP * n * (n - 1) / 2;
+      var albumSize = CONFIG.ALBUMS[0].stickers.length;
+      var a = Math.floor((n - 1) / albumSize);
+      var i = ((n - 1) % albumSize) + 1;
+      return a * Economy.unlockCurve(albumSize) + Economy.unlockCurve(i);
     },
 
     // Sticker ids not yet in state.economy.unlocked whose threshold is met.
@@ -272,8 +323,25 @@
       return table[Math.min(n, table.length) - 1];
     },
 
-    nearPerfectBonusAmount: function (firstTryCorrect) {
-      return firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT ? CONFIG.NEAR_PERFECT_BONUS : 0;
+    // Near-perfect = exactly CONFIG.NEAR_PERFECT_MISSES misses out of `plannedLength`
+    // (V2-DESIGN §3.3 — replaces the old fixed "9 out of 10" rule so it scales
+    // with the session-size slider).
+    nearPerfectBonusAmount: function (firstTryCorrect, plannedLength) {
+      return firstTryCorrect === plannedLength - CONFIG.NEAR_PERFECT_MISSES ? CONFIG.NEAR_PERFECT_BONUS : 0;
+    },
+
+    // Golden stickers (V2-DESIGN §3.4, derived, no new state): station k in
+    // MAP_PATH ORDER POSITION (k = 1…10, not the table number) reached ⇒
+    // sticker k (0-based index k-1) of album 1 is golden. Returns only ids
+    // that are ALSO unlocked (a locked-but-gilded sticker shows nothing).
+    goldenStickers: function (state) {
+      var album1 = CONFIG.ALBUMS[0].stickers;
+      var unlockedSet = new Set(state.economy.unlocked || []);
+      var golden = [];
+      CONFIG.MAP_PATH.forEach(function (table, idx) {
+        if (Map.isReached(state, table) && idx < album1.length) golden.push(album1[idx]);
+      });
+      return golden.filter(function (id) { return unlockedSet.has(id); });
     },
 
     requestReward: function (state, rewardId, id, t) {
@@ -446,10 +514,17 @@
     },
 
     // Pure: does not mutate `state`. Returns an array of directional strings
-    // (e.g. "7x2"), length up to CONFIG.SESSION_SIZE, no duplicate canonical keys.
-    plan: function (state, rng, now) {
+    // (e.g. "7x2"), length up to `size` (V2-DESIGN §3.3; defaults to
+    // CONFIG.SESSION_SIZE_DEFAULT), no duplicate canonical keys. Which
+    // carryover keys were actually consumed is exposed as a non-enumerable
+    // `carryoverTaken` property on the returned array (SessionCore.start
+    // records it on `active`) so the array itself stays plain for any
+    // existing length/deepEqual comparison.
+    plan: function (state, rng, now, size) {
+      size = typeof size === "number" && size > 0 ? size : CONFIG.SESSION_SIZE_DEFAULT;
       var used = new Set();
       var planned = [];
+      var carryoverTaken = [];
 
       function tryAdd(key) {
         if (used.has(key)) return false;
@@ -459,15 +534,16 @@
         return true;
       }
 
-      // 1. Carryover FIFO first — overflow beyond SESSION_SIZE stays queued
+      // 1. Carryover FIFO first — overflow beyond `size` stays queued
       //    (state.carryover itself is never mutated here; SessionCore.finish
-      //    recomputes the next carryover from misses + unconsumed leftover).
+      //    recomputes the next carryover from misses + unconsumed leftover,
+      //    by key, using carryoverTaken below — V2-DESIGN §3.3).
       var carryover = state.carryover || [];
-      for (var c = 0; c < carryover.length && planned.length < CONFIG.SESSION_SIZE; c++) {
-        tryAdd(carryover[c]);
+      for (var c = 0; c < carryover.length && planned.length < size; c++) {
+        if (tryAdd(carryover[c])) carryoverTaken.push(carryover[c]);
       }
 
-      var remaining = CONFIG.SESSION_SIZE - planned.length;
+      var remaining = size - planned.length;
       if (remaining > 0) {
         var allKeys = Facts.allKeys();
 
@@ -545,20 +621,22 @@
         }
 
         // 4. Random fill (only reached if the pools above could not fill the session).
-        if (planned.length < CONFIG.SESSION_SIZE) {
+        if (planned.length < size) {
           var leftoverKeys = fisherYatesShuffle(
             allKeys.filter(function (k) {
               return !used.has(k);
             }),
             rng
           );
-          for (var f = 0; f < leftoverKeys.length && planned.length < CONFIG.SESSION_SIZE; f++) {
+          for (var f = 0; f < leftoverKeys.length && planned.length < size; f++) {
             tryAdd(leftoverKeys[f]);
           }
         }
       }
 
-      return fisherYatesShuffle(planned, rng);
+      var result = fisherYatesShuffle(planned, rng);
+      Object.defineProperty(result, "carryoverTaken", { value: carryoverTaken, enumerable: false });
+      return result;
     },
   };
 
@@ -708,7 +786,7 @@
         totalCoins += seriesExtra;
       }
     } else {
-      var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect);
+      var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect, active.planned.length);
       if (nearAmount > 0) {
         Economy.ledgerAppend(state, { id: "l_" + sid + "_near", t: now, type: "earn", amount: nearAmount, ref: sid, note: "near-perfect" });
         totalCoins += nearAmount;
@@ -719,17 +797,22 @@
   }
 
   // Falling mode never touches carryover (I-F1) — state.carryover stays
-  // exactly as it was when the session started.
+  // exactly as it was when the session started. Typed: leftover = the
+  // carryover keys NOT consumed by this session (by key, via
+  // active.carryoverTaken — V2-DESIGN §3.3), not a slice by size; a legacy
+  // journal with no carryoverTaken field falls back to the old "first
+  // planned.length carryover keys" behaviour.
   function computeNextCarryover(state, active, misses) {
     var isFalling = active.mode === "falling";
-    var nextCarryover = state.carryover || [];
-    if (!isFalling) {
-      var leftoverCarryover = nextCarryover.slice(CONFIG.SESSION_SIZE);
-      nextCarryover = [];
-      misses.concat(leftoverCarryover).forEach(function (k) {
-        if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
-      });
-    }
+    var carryover = state.carryover || [];
+    if (isFalling) return carryover;
+    var taken = Array.isArray(active.carryoverTaken) ? active.carryoverTaken : carryover.slice(0, active.planned.length);
+    var takenSet = new Set(taken);
+    var leftoverCarryover = carryover.filter(function (k) { return !takenSet.has(k); });
+    var nextCarryover = [];
+    misses.concat(leftoverCarryover).forEach(function (k) {
+      if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
+    });
     return nextCarryover;
   }
 
@@ -833,6 +916,15 @@
       return SessionCore.start(state, rng, now, { mode: mode });
     },
 
+    // Clamp an arbitrary sessionSize (settings/import/hand-built state) into
+    // [SESSION_SIZE_MIN, SESSION_SIZE_MAX], defaulting when absent/invalid
+    // (V2-DESIGN §3.3). Read once, here, at start() — never again this session.
+    resolveSessionSize: function (state) {
+      var raw = state.settings && state.settings.sessionSize;
+      var n = typeof raw === "number" && isFinite(raw) ? Math.round(raw) : CONFIG.SESSION_SIZE_DEFAULT;
+      return Math.max(CONFIG.SESSION_SIZE_MIN, Math.min(CONFIG.SESSION_SIZE_MAX, n));
+    },
+
     start: function (state, rng, now, opts) {
       if (state.active) {
         var err = new Error("cannot start: a session is already active (state.active is set)");
@@ -840,7 +932,9 @@
         throw err;
       }
       var mode = opts && opts.mode === "falling" ? "falling" : "typed";
-      var planned = Selector.plan(state, rng, now);
+      var size = SessionCore.resolveSessionSize(state);
+      var planned = Selector.plan(state, rng, now, size);
+      var carryoverTaken = planned.carryoverTaken || [];
       var settingsSnapshot = SessionCore.buildSnapshot(state, mode);
       var active = {
         id: "s_" + now + "_" + Math.floor(rng() * 1e6),
@@ -853,6 +947,7 @@
         attempts: [],
         current: null,
         deferred: [],
+        carryoverTaken: carryoverTaken.slice(),
       };
       state.active = active;
       return active;
@@ -1005,6 +1100,13 @@
       var bonuses = applyBonuses(state, active, sid, firstAttempts, now);
       var totalCoins = bonuses.totalCoins, perfect = bonuses.perfect, perfectSeries = bonuses.perfectSeries;
 
+      // V2-DESIGN §3.4 describes this as "newUnlocks() after every ledger
+      // append" — in this code that's ONE call, here, after applyBonuses has
+      // already appended every ledger entry (_earn/_streak_n/_perfect/
+      // _series/_near). That is mathematically equivalent (unlockThreshold
+      // is monotone in lifetime coins, so checking once after the last
+      // append yields the same result as checking after each one) — closing
+      // review docs nit, package 1, 2026-08-29.
       var unlocksEarned = Economy.newUnlocks(state);
       state.economy.unlocked = (state.economy.unlocked || []).concat(unlocksEarned);
 
@@ -1367,6 +1469,12 @@
           durationSec: rs.falling && typeof rs.falling.durationSec === "number" ? rs.falling.durationSec : CONFIG.FALLING.DEFAULT_DURATION_SEC,
           options: rs.falling && typeof rs.falling.options === "number" ? rs.falling.options : CONFIG.FALLING.DEFAULT_OPTIONS,
         },
+        // Session size slider (V2-DESIGN §3.3). Additive since this batch; old
+        // backups default to CONFIG.SESSION_SIZE_DEFAULT, clamped into bounds.
+        sessionSize: (function () {
+          var n = typeof rs.sessionSize === "number" && isFinite(rs.sessionSize) ? Math.round(rs.sessionSize) : CONFIG.SESSION_SIZE_DEFAULT;
+          return Math.max(CONFIG.SESSION_SIZE_MIN, Math.min(CONFIG.SESSION_SIZE_MAX, n));
+        })(),
       };
     },
 
@@ -1554,18 +1662,25 @@
       }
       if (raw.settings !== undefined && (typeof raw.settings !== "object" || raw.settings === null)) {
         problems.push("settings must be an object");
-      } else if (raw.settings && raw.settings.falling !== undefined) {
-        var rf = raw.settings.falling;
-        if (!rf || typeof rf !== "object" || Array.isArray(rf)) {
-          problems.push("settings.falling must be an object");
-        } else {
-          if (rf.enabled !== undefined && typeof rf.enabled !== "boolean") problems.push("settings.falling.enabled must be a boolean");
-          if (rf.durationSec !== undefined && (typeof rf.durationSec !== "number" || rf.durationSec < CONFIG.FALLING.MIN_DURATION_SEC || rf.durationSec > CONFIG.FALLING.MAX_DURATION_SEC)) {
-            problems.push("settings.falling.durationSec out of range");
+      } else if (raw.settings) {
+        if (raw.settings.falling !== undefined) {
+          var rf = raw.settings.falling;
+          if (!rf || typeof rf !== "object" || Array.isArray(rf)) {
+            problems.push("settings.falling must be an object");
+          } else {
+            if (rf.enabled !== undefined && typeof rf.enabled !== "boolean") problems.push("settings.falling.enabled must be a boolean");
+            if (rf.durationSec !== undefined && (typeof rf.durationSec !== "number" || rf.durationSec < CONFIG.FALLING.MIN_DURATION_SEC || rf.durationSec > CONFIG.FALLING.MAX_DURATION_SEC)) {
+              problems.push("settings.falling.durationSec out of range");
+            }
+            if (rf.options !== undefined && (typeof rf.options !== "number" || rf.options < CONFIG.FALLING.MIN_OPTIONS || rf.options > CONFIG.FALLING.MAX_OPTIONS)) {
+              problems.push("settings.falling.options out of range");
+            }
           }
-          if (rf.options !== undefined && (typeof rf.options !== "number" || rf.options < CONFIG.FALLING.MIN_OPTIONS || rf.options > CONFIG.FALLING.MAX_OPTIONS)) {
-            problems.push("settings.falling.options out of range");
-          }
+        }
+        // Session size slider (V2-DESIGN §3.3) — same bounded-number pattern as falling.
+        if (raw.settings.sessionSize !== undefined &&
+            (typeof raw.settings.sessionSize !== "number" || raw.settings.sessionSize < CONFIG.SESSION_SIZE_MIN || raw.settings.sessionSize > CONFIG.SESSION_SIZE_MAX)) {
+          problems.push("settings.sessionSize out of range");
         }
       }
       if (raw.carryover !== undefined && !Array.isArray(raw.carryover)) {
@@ -1590,6 +1705,8 @@
         if (!Array.isArray(val.retryQueue)) problems.push(name + ".retryQueue must be an array");
         if (!Array.isArray(val.attempts)) problems.push(name + ".attempts must be an array");
         if (val.deferred !== undefined && !Array.isArray(val.deferred)) problems.push(name + ".deferred must be an array");
+        // Additive V2-DESIGN §3.3 field; absent = legacy journal (computeNextCarryover falls back).
+        if (val.carryoverTaken !== undefined && !Array.isArray(val.carryoverTaken)) problems.push(name + ".carryoverTaken must be an array");
       });
       [["active", raw.active], ["parked", raw.parked]].forEach(function (pair) {
         var name = pair[0], a = pair[1];

@@ -56,7 +56,7 @@ python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפ
 
 # Math Tables (לוח הכפל)
 
-A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a sticker collection, parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
+A Hebrew multiplication-tables (1×1–10×10) practice game for an 8-year-old girl. Typed answers, no hints, coins per question, a two-album, 48-sticker collection (a second album unlocks once the first is complete; some stickers turn "golden" as journey-map stations are reached), parent-defined real rewards, an optional never-punishing Challenge Mode (a turtle walking to a flag), a dot-array picture after a wrong answer, a small cheering "audience" of unlocked stickers on the question screen, a parent-adjustable session length (10–20 questions per round), and a journey map of 10 stations — one per table in learning order (×1 → ×2 → ×10 → ×5 → ×3 → ×4 → ×6 → ×9 → ×8 → ×7) — that light up when all 10 facts of a table are mastered and never go dark again. A PIN-locked parent view has stats, a rewards editor, and backup tools.
 
 🔗 **Live at:** https://marvol26.github.io/math-tables/
 

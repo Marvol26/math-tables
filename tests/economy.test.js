@@ -59,10 +59,16 @@ test("perfectSeriesExtra: 1st perfect +0, 2nd +5, 3rd+ +10 (last entry repeats)"
   assert.equal(Economy.perfectSeriesExtra(7), 10);
 });
 
-test("9/10 first-try-correct earns the near-perfect bonus; other counts do not", () => {
-  assert.equal(Economy.nearPerfectBonusAmount(9), CONFIG.NEAR_PERFECT_BONUS);
-  assert.equal(Economy.nearPerfectBonusAmount(10), 0);
-  assert.equal(Economy.nearPerfectBonusAmount(8), 0);
+test("near-perfect = exactly NEAR_PERFECT_MISSES misses out of plannedLength (V2-DESIGN §3.3, scales with session size)", () => {
+  assert.equal(CONFIG.NEAR_PERFECT_MISSES, 1);
+  // 10-question session: 9/10 (1 miss) is near-perfect, 10/10 is perfect (not near-perfect), 8/10 is not.
+  assert.equal(Economy.nearPerfectBonusAmount(9, 10), CONFIG.NEAR_PERFECT_BONUS);
+  assert.equal(Economy.nearPerfectBonusAmount(10, 10), 0);
+  assert.equal(Economy.nearPerfectBonusAmount(8, 10), 0);
+  // 20-question session: near-perfect is 19/20, not 9/20 — the bonus scales with the plan size.
+  assert.equal(Economy.nearPerfectBonusAmount(19, 20), CONFIG.NEAR_PERFECT_BONUS);
+  assert.equal(Economy.nearPerfectBonusAmount(9, 20), 0);
+  assert.equal(Economy.nearPerfectBonusAmount(20, 20), 0);
 });
 
 test("approving a request twice produces exactly one redeem entry", () => {
@@ -129,6 +135,68 @@ test("unlockThreshold and newUnlocks follow the 25n + 5n(n-1)/2 curve", () => {
   Economy.ledgerAppend(state, { id: "l_e1", t: 1, type: "earn", amount: 60, ref: "s1", note: "" });
   const unlocks = Economy.newUnlocks(state);
   assert.deepEqual(unlocks, [CONFIG.STICKERS[0], CONFIG.STICKERS[1]]);
+});
+
+test("[V2-DESIGN §3.4] two 24-sticker albums, UNLOCK_COUNT 48, ids unique", () => {
+  assert.equal(CONFIG.ALBUMS.length, 2);
+  assert.equal(CONFIG.ALBUMS[0].id, "animals");
+  assert.equal(CONFIG.ALBUMS[1].id, "adventure");
+  assert.equal(CONFIG.ALBUMS[0].stickers.length, 24);
+  assert.equal(CONFIG.ALBUMS[1].stickers.length, 24);
+  assert.equal(CONFIG.UNLOCK_COUNT, 48);
+  assert.equal(CONFIG.STICKERS.length, 48);
+  assert.equal(new Set(CONFIG.STICKERS).size, 48); // every id unique across both albums
+});
+
+test("[V2-DESIGN §3.4] unlockThreshold exact album boundaries: n=24 -> 1980, n=25 -> 2005, n=48 -> 3960", () => {
+  assert.equal(Economy.unlockThreshold(24), 1980);
+  assert.equal(Economy.unlockThreshold(25), 2005);
+  assert.equal(Economy.unlockThreshold(48), 3960);
+});
+
+test("[V2-DESIGN §3.4] newUnlocks reaches into album 2 once lifetime coins cross the album-1 boundary", () => {
+  const state = emptyState();
+  Economy.ledgerAppend(state, { id: "l_e1", t: 1, type: "earn", amount: 2005, ref: "s1", note: "" });
+  state.economy.unlocked = CONFIG.STICKERS.slice(0, 24); // album 1 fully unlocked already
+  const unlocks = Economy.newUnlocks(state);
+  assert.deepEqual(unlocks, [CONFIG.STICKERS[24]]); // first sticker of album 2 ("rocket")
+  assert.equal(CONFIG.STICKERS[24], "rocket");
+});
+
+test("[V2-DESIGN §3.4] goldenStickers: station k (MAP_PATH position) reached -> sticker k of album 1 is golden, only if unlocked", () => {
+  const state = emptyState();
+  state.map = { reached: {} };
+  // MAP_PATH = [1, 2, 10, ...]; reach the first two stations (positions 1 and 2).
+  state.map.reached[CONFIG.MAP_PATH[0]] = 1;
+  state.map.reached[CONFIG.MAP_PATH[1]] = 2;
+  const album1 = CONFIG.ALBUMS[0].stickers;
+  // Neither sticker unlocked yet -> no golden reveal anywhere (no reveal of a locked sticker).
+  assert.deepEqual(Economy.goldenStickers(state), []);
+  // Unlock only the first of the two gilded stickers.
+  state.economy.unlocked = [album1[0]];
+  assert.deepEqual(Economy.goldenStickers(state), [album1[0]]);
+  // Unlock both.
+  state.economy.unlocked = [album1[0], album1[1]];
+  assert.deepEqual(Economy.goldenStickers(state), [album1[0], album1[1]]);
+});
+
+// Package-1 closing review F3: the two assertions above reach only
+// MAP_PATH[0]/[1] (tables 1, 2), where path POSITION (0/1) happens to equal
+// (table-1) — so a mutant that gilds `album1[table - 1]` instead of the
+// correct `album1[idx]` survives undetected. MAP_PATH[2] = table 10, where
+// idx (2) and table-1 (9) diverge (album1[2] = "fox", album1[9] = "koala"),
+// which kills that mutant.
+test("[V2-DESIGN §3.4 / F3] goldenStickers gilds by PATH POSITION, not by table number: MAP_PATH[2] (table 10) gilds album1[2] (\"fox\"), never album1[9] (\"koala\")", () => {
+  const state = emptyState();
+  state.map = { reached: {} };
+  state.map.reached[CONFIG.MAP_PATH[2]] = 1; // table 10, path position index 2
+  const album1 = CONFIG.ALBUMS[0].stickers;
+  assert.equal(CONFIG.MAP_PATH[2], 10, "sanity: this is the design's own path order");
+  assert.equal(album1[2], "fox");
+  assert.equal(album1[9], "koala");
+  state.economy.unlocked = [album1[2], album1[9]]; // unlock BOTH candidates so only golden-ness distinguishes them
+  assert.deepEqual(Economy.goldenStickers(state), [album1[2]]);
+  assert.ok(!Economy.goldenStickers(state).includes(album1[9]), "koala (table-1 indexing) must NOT be golden");
 });
 
 test("[WP1-gate minor] approveRequest never marks a request approved if the ledger entry id collides (no free reward)", () => {

@@ -9,11 +9,18 @@
   var T = window.MathText.T, escapeHtml = window.MathText.escapeHtml, tableTag = window.MathText.tableTag, bdi = window.MathText.bdi;
 
   // Sticker artwork (UI concern — core.js only knows the ids). P2.
+  // Album 2 emoji (V2-DESIGN §3.4) extracted programmatically from
+  // docs/V2-DESIGN.md line 63 to avoid any transcription error, incl. the
+  // variation-selector glyphs (racecar, island, map).
   var STICKER_EMOJI = {
     cat: "🐱", dog: "🐶", fox: "🦊", owl: "🦉", bee: "🐝", frog: "🐸",
     fish: "🐠", duck: "🦆", panda: "🐼", koala: "🐨", lion: "🦁", tiger: "🐯",
     zebra: "🦓", giraffe: "🦒", elephant: "🐘", monkey: "🐵", rabbit: "🐰", hedgehog: "🦔",
     turtle: "🐢", dolphin: "🐬", butterfly: "🦋", ladybug: "🐞", unicorn: "🦄", dragon: "🐉",
+    rocket: "🚀", ufo: "🛸", planet: "🪐", moon: "🌙", star: "⭐", rainbow: "🌈",
+    castle: "🏰", ferris: "🎡", carousel: "🎠", circus: "🎪", train: "🚂", helicopter: "🚁",
+    sailboat: "⛵", racecar: "🏎️", tractor: "🚜", canoe: "🛶", volcano: "🌋", island: "🏝️",
+    tent: "⛺", balloon: "🎈", kite: "🪁", compass: "🧭", map: "🗺️", crown: "👑",
   };
   function stickerArt(id) { return STICKER_EMOJI[id] || "🎁"; }
 
@@ -165,7 +172,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.14.0"; // set by tools/bump-version.js — do not hand-edit
+  var APP_VERSION = "0.15.0"; // set by tools/bump-version.js — do not hand-edit
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -603,6 +610,7 @@
     // how much the equation font shrinks.
     render(
       '<div class="screen" data-screen="question">' +
+        audienceHtml(state, active.id) +
         '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem">' + T.question.exitButton + "</button>" +
         '<div class="question-info">' +
         '<div class="dots">' + dotsHtml + "</div>" +
@@ -673,6 +681,39 @@
     };
   }
 
+  // ------------------------------------------------------------------
+  // Spectators ("הקהל", V2-DESIGN §3.2): a purely decorative strip on both
+  // question screens (and the summary when perfect). Zero layout impact by
+  // construction — the caller places this HTML as an absolutely-positioned,
+  // pointer-events:none sibling (see styles.css .audience); it never affects
+  // .lanes/.question-info geometry. Membership is a pure function of
+  // `seedKey` (active.id for a question screen, session.id for the summary)
+  // so it stays stable across re-renders of the SAME screen. Members are the
+  // newest unlocked sticker + up to AUDIENCE_MAX-1 others, seeded-shuffled;
+  // drawn only from ids present in CONFIG.STICKERS (canonicalisation already
+  // guarantees state.economy.unlocked contains only known ids).
+  function audienceHtml(state, seedKey, opts) {
+    var unlocked = (state.economy.unlocked || []).filter(function (id) { return CONFIG.STICKERS.indexOf(id) !== -1; });
+    if (!unlocked.length) return ""; // no stickers yet -> strip absent
+    var newest = unlocked[unlocked.length - 1];
+    var rest = unlocked.slice(0, -1);
+    var rng = seededRngFromString(String(seedKey) + ":audience");
+    var shuffled = rest.slice();
+    for (var i = shuffled.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
+    }
+    var members = [newest].concat(shuffled.slice(0, CONFIG.AUDIENCE_MAX - 1));
+    var goldenSet = {};
+    MathCore.Economy.goldenStickers(state).forEach(function (id) { goldenSet[id] = true; });
+    var allBounce = opts && opts.allBounce;
+    var itemsHtml = members.map(function (id, i) {
+      var cls = "audience-member" + (allBounce ? " audience-bounce" : "") + (goldenSet[id] ? " golden" : "");
+      return '<span class="' + cls + '" style="--ai:' + i + '">' + stickerArt(id) + "</span>";
+    }).join("");
+    return '<div class="audience">' + itemsHtml + "</div>";
+  }
+
   function renderFallingQuestion() {
     var state = S();
     var vm = questionViewModel(state);
@@ -703,6 +744,7 @@
         '<div class="cloud" style="top:8%;--cd:46s;animation-delay:-12s"></div>' +
         '<div class="cloud" style="top:30%;--cd:60s;animation-delay:-35s;--cs:0.7"></div>' +
         '<div class="cloud" style="top:55%;--cd:52s;animation-delay:-5s;opacity:0.6"></div>' +
+        audienceHtml(state, active.id) +
         '<button class="ghost" data-action="exit" style="position:absolute;top:0.5rem;inset-inline-end:0.5rem;z-index:4">' + T.question.exitButton + "</button>" +
         '<div class="question-info">' +
         '<div class="dots">' + dotsHtml + "</div>" +
@@ -1081,7 +1123,13 @@
   };
 
   function renderSummary(session) {
-    var stars = session.firstTryCorrect === session.planned.length ? 3 : session.firstTryCorrect >= 8 ? 2 : 1;
+    // V2-DESIGN §3.3: perfect -> 3 stars; >= STARS_TWO_RATIO of planned.length
+    // first-try-correct -> 2; else 1. Near-perfect = exactly NEAR_PERFECT_MISSES misses.
+    var stars = session.firstTryCorrect === session.planned.length
+      ? 3
+      : session.firstTryCorrect / session.planned.length >= CONFIG.STARS_TWO_RATIO
+        ? 2
+        : 1;
     var fallingSuffix = session.mode === "falling" ? " 🎈" : "";
     // D2 (Marat 2026-08-28): a perfect round that is 2nd+ in a row gets its own
     // title + series-bonus banner instead of the plain perfect title.
@@ -1091,7 +1139,7 @@
         '<div class="station-banner">' + T.summary.seriesBonus(MathCore.Economy.perfectSeriesExtra(session.perfectSeries)) + "</div>"
       : session.perfect
         ? '<h1 class="summary-title-perfect">' + T.summary.perfectTitle + fallingSuffix + "</h1><p>" + T.summary.perfectSub + "</p>"
-        : session.firstTryCorrect === CONFIG.NEAR_PERFECT_MIN_CORRECT
+        : session.firstTryCorrect === session.planned.length - CONFIG.NEAR_PERFECT_MISSES
           ? "<h1>" + T.summary.nearPerfectTitle + fallingSuffix + "</h1>"
           : "<h1>" + T.summary.encouragingTitle + fallingSuffix + "</h1>";
     var learnedList = session.misses.length
@@ -1101,15 +1149,33 @@
         }).join(", ") + "</p>"
       : "";
     var reached = session.stationsReached || [];
+    // V2-DESIGN §3.4: a reached station shows its gilded (golden) sticker only
+    // if that sticker is ALREADY unlocked (no reveal of a locked sticker
+    // anywhere, including here) — the live post-finish state, not a snapshot.
+    var goldenNowUnlocked = {};
+    MathCore.Economy.goldenStickers(S()).forEach(function (id) { goldenNowUnlocked[id] = true; });
+    var reachedGoldHtml = reached
+      .map(function (table) {
+        var idx = CONFIG.MAP_PATH.indexOf(table);
+        var stickerId = idx !== -1 ? CONFIG.ALBUMS[0].stickers[idx] : null;
+        return stickerId && goldenNowUnlocked[stickerId] ? '<span class="sticker-reveal">' + stickerArt(stickerId) + "</span>" : "";
+      })
+      .join("");
     var stationHtml = reached.length
-      ? '<div class="station-banner">' + (reached.length === 1 ? T.summary.stationReached(reached[0]) : T.summary.stationsReached(reached)) + "</div>"
+      ? '<div class="station-banner">' + (reached.length === 1 ? T.summary.stationReached(reached[0]) : T.summary.stationsReached(reached)) + reachedGoldHtml + "</div>"
       : "";
+    // V2-DESIGN §3.1: summary reveal shows emoji + name + nick (not just the emoji).
     var unlockHtml = session.unlocksEarned.length
-      ? "<p>" + T.summary.unlockReveal + "</p><div>" + session.unlocksEarned.map(function (id) { return '<span class="sticker-reveal">' + stickerArt(id) + "</span>"; }).join(" ") + "</div>"
+      ? "<p>" + T.summary.unlockReveal + "</p><div>" + session.unlocksEarned.map(function (id) {
+          var info = T.stickers[id];
+          return '<span class="sticker-reveal">' + stickerArt(id) + "</span>" +
+            (info ? '<div class="sticker-name">' + escapeHtml(info.name) + "</div><div class=\"sticker-nick\">" + escapeHtml(info.nick) + "</div>" : "");
+        }).join(" ") + "</div>"
       : "";
 
     render(
       '<div class="screen" data-screen="summary">' +
+        audienceHtml(S(), session.id, { allBounce: session.perfect }) +
         '<div class="stars">' + "⭐".repeat(stars) + "</div>" +
         titleHtml +
         "<p>" + bdi(session.firstTryCorrect + "/" + session.planned.length) + "</p>" +
@@ -1184,9 +1250,18 @@
         return '<span class="fact-chip ' + m + '">' + p[0] + " × " + p[1] + "</span>";
       }).join("");
       var status = row.reached ? T.map.reachedLabel : row.current ? T.map.currentLabel : T.map.aheadLabel;
+      // V2-DESIGN §3.4: this station's gilded sticker is named ONLY if it is
+      // already unlocked (no reveal of a locked sticker anywhere).
+      var goldIdx = CONFIG.MAP_PATH.indexOf(mapSelectedStation);
+      var goldStickerId = goldIdx !== -1 ? CONFIG.ALBUMS[0].stickers[goldIdx] : null;
+      var goldUnlocked = goldStickerId && (state.economy.unlocked || []).indexOf(goldStickerId) !== -1;
+      var goldsHtml = goldUnlocked
+        ? '<div class="muted">' + T.map.goldsSticker(escapeHtml(T.stickers[goldStickerId] ? T.stickers[goldStickerId].name : "")) + "</div>"
+        : "";
       detail =
         '<div class="card">' +
         "<h2>" + T.map.stationTitle(mapSelectedStation) + " · " + status + "</h2>" +
+        goldsHtml +
         '<div class="fact-chips">' + chips + "</div>" +
         '<div class="muted" style="margin-top:0.5rem">' + T.map.chipsLegend + "</div></div>";
     }
@@ -1212,15 +1287,39 @@
     });
   };
 
+  // V2-DESIGN §3.1/§3.4: one shelf per album; unlocked shows emoji + name +
+  // nick, golden ring for a gilded (map-station) sticker; locked shows "?"
+  // with NO title attribute (the old markup leaked the animal id via title=).
   Screens.collection = function () {
     var state = S();
     var totals = MathCore.Stats.totals(state, Date.now());
     var unlockedSet = {};
     (state.economy.unlocked || []).forEach(function (id) { unlockedSet[id] = true; });
-    var stickersHtml = CONFIG.STICKERS.map(function (id, i) {
-      var cls = unlockedSet[id] ? "sticker unlocked" : "sticker";
-      return '<div class="' + cls + '" title="' + id + '">' + (unlockedSet[id] ? stickerArt(id) : "?") + "</div>";
+    var goldenSet = {};
+    MathCore.Economy.goldenStickers(state).forEach(function (id) { goldenSet[id] = true; });
+
+    var shelvesHtml = CONFIG.ALBUMS.map(function (album) {
+      var albumStickers = album.stickers;
+      var unlockedCount = albumStickers.filter(function (id) { return unlockedSet[id]; }).length;
+      var stickersHtml = albumStickers.map(function (id) {
+        var cls = "sticker" + (unlockedSet[id] ? " unlocked" : "") + (goldenSet[id] ? " golden" : "");
+        if (!unlockedSet[id]) return '<div class="' + cls + '">?</div>';
+        var info = T.stickers[id];
+        return (
+          '<div class="' + cls + '">' + stickerArt(id) +
+          (info ? '<span class="sticker-name">' + escapeHtml(info.name) + "</span><span class=\"sticker-nick\">" + escapeHtml(info.nick) + "</span>" : "") +
+          "</div>"
+        );
+      }).join("");
+      var doneHtml = unlockedCount >= albumStickers.length ? '<div class="station-banner">' + T.collection.albumDone + "</div>" : "";
+      var titleText = T.albums[album.id] || "";
+      return (
+        (titleText ? '<div class="album-shelf-title">' + escapeHtml(titleText) + "</div>" : "") +
+        '<div class="sticker-shelf">' + stickersHtml + "</div>" +
+        doneHtml
+      );
     }).join("");
+
     var nextIndex = (state.economy.unlocked || []).length; // 0-based count -> next threshold n = count+1
     var progressHtml;
     if (nextIndex >= CONFIG.UNLOCK_COUNT) {
@@ -1232,7 +1331,7 @@
     render(
       '<div class="screen" data-screen="collection">' +
         "<h1>" + T.collection.title + "</h1>" +
-        '<div class="sticker-shelf">' + stickersHtml + "</div>" +
+        shelvesHtml +
         progressHtml +
         '<button class="secondary" data-action="back">' + T.collection.backBtn + "</button>" +
         "</div>"
@@ -1429,6 +1528,8 @@
         return opts;
       })() +
       "</select></label><br><br>" +
+      "<label>" + T.parent.sessionSizeLabel + ': <span id="set-session-size-value">' + state.settings.sessionSize + "</span><br>" +
+      '<input id="set-session-size" type="range" min="' + CONFIG.SESSION_SIZE_MIN + '" max="' + CONFIG.SESSION_SIZE_MAX + '" value="' + state.settings.sessionSize + '" /></label><br><br>' +
       '<button data-action="save-settings">' + T.parent.saveSettingsBtn + "</button> " +
       '<button class="secondary" data-action="change-pin">' + T.parent.changePinBtn + "</button>" +
       '<div class="muted" id="settings-saved-msg" style="min-height:1.2em"></div>' +
@@ -1445,6 +1546,10 @@
     fallingRangeInput.addEventListener("input", function () {
       document.getElementById("set-falling-duration-value").textContent = fallingRangeInput.value;
     });
+    var sessionSizeInput = document.getElementById("set-session-size");
+    sessionSizeInput.addEventListener("input", function () {
+      document.getElementById("set-session-size-value").textContent = sessionSizeInput.value;
+    });
     bindAction("save-settings", function () {
       var name = document.getElementById("set-name").value.trim();
       var challengeOn = document.getElementById("set-challenge").checked;
@@ -1453,12 +1558,14 @@
       var fallingEnabled = document.getElementById("set-falling-enable").checked;
       var fallingDurationSec = Number(document.getElementById("set-falling-duration").value);
       var fallingOptions = Number(document.getElementById("set-falling-options").value);
+      var sessionSize = Number(document.getElementById("set-session-size").value);
       save(function (s) {
         s.settings.childName = name;
         s.settings.challengeOn = challengeOn;
         s.settings.timeLimitSec = timeLimitSec;
         s.settings.sound = sound;
         s.settings.falling = { enabled: fallingEnabled, durationSec: fallingDurationSec, options: fallingOptions };
+        s.settings.sessionSize = sessionSize;
       }).then(function (result) {
         if (result.ok) document.getElementById("settings-saved-msg").textContent = T.parent.settingsSaved;
       });

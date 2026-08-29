@@ -40,7 +40,12 @@
   .ltr { direction: ltr; unicode-bidi: isolate; }
   .muted { color: var(--muted); font-size: 0.9rem; }
   .coin-pill { display: inline-flex; align-items: center; gap: 0.35rem; background: var(--gold); color: var(--text); border-radius: 999px; padding: 0.4rem 0.9rem; font-weight: bold; }
-  .dots { display: flex; gap: 0.4rem; justify-content: center; }
+  /* V2-DESIGN §3.3: sessions up to 20 questions need a second row of dots
+     instead of overflowing the screen — max-width caps it to the available
+     width (screen padding is 1.5rem/0.5rem, see .screen/.screen.compact
+     above) so flex-wrap actually engages instead of shrink-to-fit growing
+     past the viewport. */
+  .dots { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; max-width: min(90vw, 400px); }
   .dot { width: 12px; height: 12px; border-radius: 50%; background: #E4E8F0; }
   .dot.done { background: var(--correct); }
   .dot.retry { background: var(--wrong); }
@@ -119,14 +124,80 @@
   .sticker-reveal { font-size: 3rem; display: inline-block; animation: pop 0.8s ease; }
   .summary-title-perfect { animation: pop 0.8s ease; }
   .sticker-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 0.6rem; width: min(480px, 92vw); }
-  .sticker { font-size: 2rem; background: var(--card-bg); border-radius: 16px; padding: 0.6rem; opacity: 0.25; }
+  .sticker { font-size: 2rem; background: var(--card-bg); border-radius: 16px; padding: 0.6rem; opacity: 0.25; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; position: relative; }
   .sticker.unlocked { opacity: 1; }
+  /* V2-DESIGN §3.1: unlocked stickers show name + nick under the emoji. */
+  .sticker-name { font-size: 0.72rem; font-weight: bold; line-height: 1.1; }
+  .sticker-nick { font-size: 0.6rem; color: var(--muted); line-height: 1.1; }
+  /* V2-DESIGN §3.4: golden = gold ring + sparkle; never shown on a locked sticker. */
+  .sticker.golden { box-shadow: 0 0 0 3px var(--gold), 0 0 14px 4px rgba(255,201,60,0.55); }
+  .sticker.golden::after { content: "✨"; position: absolute; top: -0.3rem; inset-inline-end: -0.2rem; font-size: 1rem; }
+  .album-shelf-title { font-weight: bold; width: 100%; text-align: start; margin: 0.6rem 0 0; }
+  .album-shelf-title:first-child { margin-top: 0; }
   .reward-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(420px, 92vw); }
   .banner { position: fixed; left: 0; right: 0; text-align: center; padding: 0.6rem 1rem; z-index: 800; }
+  /* Spectators ("הקהל", V2-DESIGN §3.2): absolute + pointer-events:none so
+     this strip has ZERO layout impact on .lanes/.question-info (D3 stays
+     law) — proven by the headless harness (1-3 status log). Idle = slow
+     staggered bob; feedback-correct/-wrong classes on the ANCESTOR .screen
+     (already applied by showFeedback()) drive hop/wobble via descendant
+     selectors below; summary applies .audience-bounce directly when perfect. */
+  /* Reviewer finding F1 (package-1 closing review, 2026-08-29): the strip's
+     zero-layout-impact proof only checked .lanes/.question-info — it never
+     checked that the strip itself doesn't visually sit on top of the
+     buttons below (question screen's numpad/toggle-keyboard/exit-bottom,
+     summary's two buttons). Fix: reserve a bottom band on exactly the two
+     screens that can render the strip via an ATTRIBUTE-SELECTOR rule (two
+     matches = specificity 0,0,2,0), so it wins over the `.screen { padding:
+     0.5rem }` shorthand in the `max-height:600px`/`420px` media queries
+     below regardless of source order (a plain `.screen { padding-bottom }`
+     rule would lose there). This does not move .lanes/.question-info
+     relative to EACH OTHER or to the strip's own with/without-strip
+     comparison (it's an unconditional per-screen rule, not tied to whether
+     any sticker is unlocked) — re-verified by the harness (status log). */
+  .screen[data-screen="question"]:not([data-falling="1"]), .screen[data-screen="summary"] { padding-bottom: 6rem; }
+  /* The falling screen was not in F1's report, but independent re-verification while fixing
+     F1 found the SAME strip-over-button bug there too (exit-bottom). Two things tried and
+     rejected first (see status log for the numbers): (a) `padding-bottom` on `.screen` does
+     nothing here because this screen overrides `justify-content: flex-start` (below) — extra
+     bottom padding only grows scrollable height, it never moves an already-flex-start-anchored
+     child up; (b) a single `.audience { bottom }` override alone can't split the difference —
+     tall viewports need it low (near exit-bottom, which sits far from .lanes there) and short
+     viewports need it high (clear of exit-bottom, which is flush to the bottom there), and no
+     one value avoided colliding with .lanes instead. The robust fix: pull exit-bottom OUT of the
+     flex flow into its own fixed `bottom` offset (like .audience already has), so both sit at a
+     constant, content-height-independent distance from the screen edge, with a guaranteed gap
+     between them at every viewport (re-verified — see status log). */
+  [data-screen="question"][data-falling="1"] [data-action="exit-bottom"] {
+    /* left/right:0 + width:fit-content + margin:auto (not left:50%+translateX, which
+       constrains shrink-to-fit width to the space right of the 50% mark and wrapped
+       this button's text — caught by re-verification) centres it without that trap. */
+    position: absolute; left: 0; right: 0; width: fit-content; margin: 0 auto; bottom: 0.6rem; z-index: 4;
+  }
+  .screen[data-falling="1"] .audience { bottom: 3.8rem; }
+  .audience { position: absolute; bottom: 2.6rem; left: 0; right: 0; display: flex; justify-content: center; gap: 0.5rem; pointer-events: none; z-index: 2; }
+  .audience-member { font-size: 1.6rem; display: inline-block; animation: audience-bob 2.4s ease-in-out infinite; animation-delay: calc(var(--ai, 0) * 0.15s); }
+  .audience-member.golden { filter: drop-shadow(0 0 4px rgba(255,201,60,0.9)); }
+  [data-screen="question"].feedback-correct .audience-member { animation: audience-hop 0.5s ease-out; }
+  [data-screen="question"].feedback-wrong .audience-member { animation: audience-wobble 0.5s ease-out; }
+  .audience-member.audience-bounce { animation: audience-hop 0.7s ease-in-out infinite; }
+  @keyframes audience-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes audience-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  @keyframes audience-wobble { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
   @media (prefers-reduced-motion: reduce) {
     .feedback-correct .equation, .feedback-wrong .equation, .feedback-fast .equation, .fast-badge, .sticker-reveal, .summary-title-perfect, .turtle, .turtle-zzz, .map-current-ring, .station-banner { animation: none; }
     .dot-array span { animation: none; opacity: 1; }
     .confetti-layer, .fireworks { display: none; }
+    /* Reviewer finding F2 (package-1 closing review, 2026-08-29): a plain
+       `.audience-member { animation: none }` here LOSES to the higher-
+       specificity feedback/bounce selectors below (0,0,3,0 / 0,0,2,0 vs this
+       rule's 0,0,1,0) regardless of media-query/source order, so RM never
+       actually went static. Repeat every selector that sets an animation on
+       .audience-member, at matching specificity, so each is overridden here. */
+    .audience-member,
+    [data-screen="question"].feedback-correct .audience-member,
+    [data-screen="question"].feedback-wrong .audience-member,
+    .audience-member.audience-bounce { animation: none; }
   }
   @media (max-height: 600px) {
     .screen { padding: 0.5rem; gap: 0.4rem; }
@@ -157,6 +228,7 @@
     justify-content: flex-start; gap: 0.6rem;
     background: linear-gradient(180deg, #DDF1FF 0%, #F3FAFF 55%, #FFF8F0 100%);
     overflow: hidden;
+    padding-bottom: 3.6rem; /* keeps the landed label above the absolute exit button on short phones (review 2026-08-29, package 1 LOW) */
   }
   [data-screen="question"][data-falling="1"] .question-info {
     position: relative; z-index: 3; background: rgba(255,255,255,0.92); border-radius: 20px;
@@ -255,7 +327,9 @@
     .bubble.landed { top: calc(100% - 104px); }
   }
   @media (max-height: 420px) and (min-width: 480px) {
-    [data-screen="question"][data-falling="1"] { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; padding: 0.4rem 0.8rem; }
+    [data-screen="question"][data-falling="1"] { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; padding: 0.4rem 0.8rem 3.6rem; }
+    [data-screen="question"][data-falling="1"] [data-action="exit-bottom"] { position: static; width: 100%; } /* landscape: back in flow under the label (review 2026-08-29) */
+    [data-screen="question"][data-falling="1"] .audience { display: none; } /* landscape: no room below the lanes for the decorative strip */
     [data-screen="question"][data-falling="1"] .question-info { margin-top: 0; }
     [data-screen="question"][data-falling="1"] .lanes { height: calc(100dvh - 1.2rem); min-height: 0; flex: 0 0 auto; width: min(440px, 58vw); }
     [data-screen="question"][data-falling="1"] .falling-landed-label { width: 100%; text-align: center; }
