@@ -192,3 +192,5 @@ If a whole later session's `endedAt` is stepped back within `EVIDENCE_CLOCK_SKEW
 - **Child playtest** of the new features on her iPad (spectators, names, 20-question rounds if enabled, album 2 progress) — the balloon start delay (0.6 s) and the 8 s mastery threshold are CONFIG numbers to tune from observation.
 - **Evidence rebuild status** shows in the parent data section ("עדכון נתוני למידה"); if it says "לא בוצע" the stored attempts were inconsistent — export the JSON and send it to the designer.
 - LOW residuals recorded by the reviews: parent x-axis "סבב N" indexes differ per chart; cloud-connect failed-save path untested (harness has no fetch); 320×568 landed-balloons label sits above the exit button only with the extra padding; landscape hides the spectators strip.
+- **Mirror pairs shipped (0.16.0, 2026-08-29).** Tunables: `MIRROR_FAST_MS` (4000) and `MIRROR_FAST_RATIO` (0.6) only affect the parent "שני הכיוונים ✓ (מהר)" signal; mastery needs both directions correct. Expect the map's per-station counts to dip for facts she has only ever answered one way — they recover as the other direction gets asked.
+
