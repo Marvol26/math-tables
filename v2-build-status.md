@@ -291,3 +291,5 @@ deviations: none beyond the caught-and-corrected README Hebrew-text overreach no
 assumptions discovered: none.
 
 ## 2026-08-29T07:22:01Z · designer · S3-R review (fresh Fable 5, first reviewer killed by the session usage limit — relaunched): SHIP-AFTER-FIXES, no behavioural regression (finish/migrate/hint/HTML differential old-vs-new byte-identical); LOWs fixed by the executor (docs, 3 result.ok checks, 6 mutants pinned) — fix-verification SHIP. Residual test debt: cloud-connect failed-save path untested (harness fetch disabled).
+
+## 2026-08-29T07:22:03Z · designer · S3 committed+pushed as 4159462 · package 1 baseline = the commit containing this entry (given verbatim in the kickoff prompt)
