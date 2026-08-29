@@ -23,7 +23,7 @@ An optional second way to play. An expression (e.g. `7 × 8`) is shown at the to
 - `settings.falling = { enabled:false, durationSec:8, options:4 }` (migrate default; additive; schema stays 1).
 - `state.active.mode = "typed" | "falling"` (default "typed"; migrate fills it). `session.mode` likewise.
 - `attempt.mode` on each attempt record.
-- `SessionCore.start(state, rng, now, { mode })`; `finish()` branches on `active.mode`: for "falling" skip `Facts.updateFromAttempt`, carryover recomputation and `Map.newlyReached`, but keep coins/ledger/unlocks/session record.
+- `SessionCore.start(state, rng, now, { mode })`. Amended 2026-08-28: falling now counts for mastery and the journey map exactly like typed answers — `Facts.updateFromAttempt` and `Map.newlyReached` both run unconditionally. The ONE thing `finish()` still skips for `active.mode === "falling"` is carryover recomputation (I-F1: `state.carryover` stays exactly as it was when the falling session started); coins/ledger/unlocks/session record are unaffected either way.
 
 ## 4. Screens
 - **Home**: "מספרים נופלים 🎈" button (only when enabled); resume label shows the mode's icon if the suspended session is falling.

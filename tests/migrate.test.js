@@ -202,3 +202,22 @@ test("[review] validateImport rejects a request with a string costSnapshot or ba
   raw.economy.rewards = [{ id: "r1", name: "x", cost: 10, active: true }];
   assert.equal(Migrate.validateImport(raw).ok, true);
 });
+
+// S3-2: reward/request ids land in HTML attributes (data-reward,
+// data-approve-request, ...); a backup crafted with a quote/angle-bracket id
+// must be rejected outright, not merely escaped at render time.
+test("[S3-2] validateImport rejects a reward or request id containing attribute-breaking characters", () => {
+  const raw = Migrate.emptyState(0);
+  raw.economy.rewards = [{ id: 'x" onclick="alert(1)', name: "x", cost: 10, active: true }];
+  assert.equal(Migrate.validateImport(raw).ok, false);
+
+  const raw2 = Migrate.emptyState(0);
+  raw2.economy.rewards = [{ id: "r1", name: "x", cost: 10, active: true }];
+  raw2.economy.requests = [{ id: 'q" onclick="alert(1)', rewardId: "r1", nameSnapshot: "x", costSnapshot: 10, t: 1, status: "requested" }];
+  assert.equal(Migrate.validateImport(raw2).ok, false);
+
+  // a well-formed id (letters/digits/underscore/hyphen, 1-64 chars) still passes
+  const raw3 = Migrate.emptyState(0);
+  raw3.economy.rewards = [{ id: "r_1699999999999_123456", name: "x", cost: 10, active: true }];
+  assert.equal(Migrate.validateImport(raw3).ok, true);
+});

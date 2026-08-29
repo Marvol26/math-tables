@@ -59,6 +59,22 @@ window.MathText = (function () {
       helperCaption: function (a, b, product) { return a + " × " + b + " = " + product; },
       helperRows: function (a, b) { return a === 1 ? "שורה אחת של " + bdi(b) : bdi(a) + " שורות של " + bdi(b); },
       strategyIntro: "דרך קלה לזכור:",
+      // S3-2: the per-trick Hebrew phrasing moved verbatim from app.js's
+      // strategyHint(a, b) switch — app.js still picks the operand (n) and
+      // its partner (m) and computes the product (p); these templates only
+      // build the display string, exactly as the switch cases did.
+      strategies: {
+        10: function (m, p) { return '<span class="ltr">' + m + " × 10 = " + m + "0</span>" + " — מוסיפים 0"; },
+        9: function (m, p) { return '<span class="ltr">' + "10 × " + m + " − " + m + " = " + (10 * m) + " − " + m + " = " + p + "</span>"; },
+        5: function (m, p) { return '<span class="ltr">' + "10 × " + m + " = " + (10 * m) + "</span>" + ", חצי מזה: " + '<span class="ltr">' + p + "</span>"; },
+        2: function (m, p) { return '<span class="ltr">' + m + " + " + m + " = " + p + "</span>"; },
+        4: function (m, p) { return '<span class="ltr">' + "2 × " + m + " = " + (2 * m) + "</span>" + ", כפול 2: " + '<span class="ltr">' + p + "</span>"; },
+        8: function (m, p) { return '<span class="ltr">' + "4 × " + m + " = " + (4 * m) + "</span>" + ", כפול 2: " + '<span class="ltr">' + p + "</span>"; },
+        3: function (m, p) { return '<span class="ltr">' + "2 × " + m + " + " + m + " = " + (2 * m) + " + " + m + " = " + p + "</span>"; },
+        6: function (m, p) { return '<span class="ltr">' + "5 × " + m + " + " + m + " = " + (5 * m) + " + " + m + " = " + p + "</span>"; },
+        7: function (m, p) { return '<span class="ltr">' + "5 × " + m + " + 2 × " + m + " = " + (5 * m) + " + " + (2 * m) + " = " + p + "</span>"; },
+        default: function (m, p) { return '<span class="ltr">' + m + " × 1 = " + m + "</span>" + " — כפול 1 נשאר אותו מספר"; },
+      },
       commutative: function (a, b, p) { return "וגם " + '<span class="ltr">' + b + " × " + a + " = " + p + "</span>"; },
       interruptedLabel: "ממשיכות בלי שעון",
       wrongAnswerWas: function (n) { return "התשובה היא " + n; },

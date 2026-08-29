@@ -355,3 +355,26 @@ test("SessionCore.submit throws when there is no current question — the exact 
   state.active = { id: "s1", planned: [], queue: [], retryQueue: [], attempts: [], current: null, mode: "falling", settingsSnapshot: { challengeOn: true, timeLimitSec: 8 } };
   assert.throws(() => SessionCore.submit(state, 42, Date.now(), {}), /no current question to submit/);
 });
+
+// S3-1: save() now hands the mutator's own return value back to the caller as
+// result.value, so a call site that needs something out of the mutation
+// (rather than reaching back into storage.state after the fact) can `return`
+// it from the mutator instead of assigning to a closure variable — the exact
+// pattern app.js's submitAnswer/paintNextQuestion/finishSession/approveRequest
+// call sites were rewritten to use.
+test("save() returns the mutator's return value as result.value", async () => {
+  const idb = new IDBFactory();
+  const storage = Storage.create({ indexedDB: idb, localStorage: makeLocalStorage(), dbName: "d10" });
+  await storage.load();
+  storage.state = seedState();
+  const result = await storage.save((s) => {
+    s.settings.sound = false;
+    return { coins: 7, label: "picked from inside the mutator" };
+  }, 100);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, { coins: 7, label: "picked from inside the mutator" });
+  // a mutator that returns nothing gives value: undefined, not a crash
+  const result2 = await storage.save((s) => { s.settings.sound = true; }, 200);
+  assert.equal(result2.ok, true);
+  assert.equal(result2.value, undefined);
+});

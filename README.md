@@ -46,7 +46,7 @@
 ## פיתוח מקומי
 
 ```bash
-npm install --ignore-scripts   # תלות פיתוח יחידה: fake-indexeddb (לבדיקות בלבד)
+npm install --ignore-scripts   # שתי תלויות פיתוח בלבד: `fake-indexeddb` ו-`linkedom`
 npm test                        # מריץ את כל הבדיקות (node --test)
 python3 -m http.server 8766     # מריץ שרת מקומי מתיקיית הפרויקט
 ```
@@ -102,7 +102,7 @@ When deploying updated files, run **`node tools/bump-version.js <x.y.z>`** and p
 ## Local development
 
 ```bash
-npm install --ignore-scripts   # single dev dependency: fake-indexeddb (tests only)
+npm install --ignore-scripts   # two dev dependencies, both test-only: fake-indexeddb and linkedom
 npm test                        # runs the full test suite (node --test)
 python3 -m http.server 8766     # serves the project root locally
 ```

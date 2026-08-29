@@ -82,7 +82,6 @@
 
     // UI timing (shared so no number lives outside CONFIG — I7)
     WRONG_ANSWER_DISPLAY_MS: 1800,
-    WRONG_ANSWER_HELPER_MS: 3200, // a wrong answer shows the dot-array picture; needs a beat longer to absorb
     HELPER_CASCADE_MS: 1100, // the dot rows light up over this much time, whatever the row count
 
     // Journey map (docs/MAP-DESIGN.md, Marat 2026-08-27)
@@ -655,6 +654,108 @@
     },
   };
 
+  // S3-3: three private helpers pulled out of SessionCore.finish (pure
+  // extraction — same order of ledger appends, same computed values; not
+  // exported, only `SessionCore.finish` calls them).
+
+  // Mints the session's coins (base + streak + perfect/near-perfect bonuses),
+  // appending every ledger entry finish() used to append inline. Returns
+  // exactly the three values finish() needs back out.
+  function applyBonuses(state, active, sid, firstAttempts, now) {
+    var baseCoins = active.attempts.reduce(function (sum, a) { return sum + a.coins; }, 0);
+    Economy.ledgerAppend(state, { id: "l_" + sid + "_earn", t: now, type: "earn", amount: baseCoins, ref: sid, note: "session" });
+    var totalCoins = baseCoins;
+
+    var firstTryCorrect = firstAttempts.filter(function (a) { return a.ok; }).length;
+
+    // Streak bonus: every 5th consecutive first-attempt correct (retries excluded).
+    var streakRun = 0;
+    var streakCount = 0;
+    firstAttempts.forEach(function (a) {
+      if (a.ok) {
+        streakRun++;
+        if (streakRun % CONFIG.STREAK_LENGTH === 0) {
+          streakCount++;
+          var amount = CONFIG.STREAK_BONUS;
+          Economy.ledgerAppend(state, {
+            // Cumulative bonus count, not the run position — two separate
+            // 5-runs in one session would otherwise collide on the same id
+            // and the duplicate-id guard would silently eat the second bonus.
+            id: "l_" + sid + "_streak_" + streakCount,
+            t: now,
+            type: "earn",
+            amount: amount,
+            ref: sid,
+            note: "streak",
+          });
+          totalCoins += amount;
+        }
+      } else {
+        streakRun = 0;
+      }
+    });
+
+    var perfect = firstTryCorrect === active.planned.length;
+    var perfectSeries = 0;
+    if (perfect) {
+      // Computed BEFORE the session record is pushed to `state.sessions`.
+      perfectSeries = Economy.perfectSeriesLength(state.sessions) + 1;
+      Economy.ledgerAppend(state, { id: "l_" + sid + "_perfect", t: now, type: "earn", amount: CONFIG.PERFECT_BONUS, ref: sid, note: "perfect" });
+      totalCoins += CONFIG.PERFECT_BONUS;
+      var seriesExtra = Economy.perfectSeriesExtra(perfectSeries);
+      if (seriesExtra > 0) {
+        Economy.ledgerAppend(state, { id: "l_" + sid + "_series", t: now, type: "earn", amount: seriesExtra, ref: sid, note: "perfect-series" });
+        totalCoins += seriesExtra;
+      }
+    } else {
+      var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect);
+      if (nearAmount > 0) {
+        Economy.ledgerAppend(state, { id: "l_" + sid + "_near", t: now, type: "earn", amount: nearAmount, ref: sid, note: "near-perfect" });
+        totalCoins += nearAmount;
+      }
+    }
+
+    return { totalCoins: totalCoins, perfect: perfect, perfectSeries: perfectSeries };
+  }
+
+  // Falling mode never touches carryover (I-F1) — state.carryover stays
+  // exactly as it was when the session started.
+  function computeNextCarryover(state, active, misses) {
+    var isFalling = active.mode === "falling";
+    var nextCarryover = state.carryover || [];
+    if (!isFalling) {
+      var leftoverCarryover = nextCarryover.slice(CONFIG.SESSION_SIZE);
+      nextCarryover = [];
+      misses.concat(leftoverCarryover).forEach(function (k) {
+        if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
+      });
+    }
+    return nextCarryover;
+  }
+
+  function makeSessionRecord(active, sid, now, firstTryCorrect, totalMs, misses, totalCoins, perfect, perfectSeries, masteredAfter, unlocksEarned, stationsReached) {
+    return {
+      id: sid,
+      startedAt: active.startedAt,
+      endedAt: now,
+      abandoned: false,
+      mode: active.mode || "typed",
+      challengeOn: active.settingsSnapshot.challengeOn,
+      timeLimitSec: active.settingsSnapshot.timeLimitSec,
+      planned: active.planned.slice(),
+      attempts: active.attempts.slice(),
+      firstTryCorrect: firstTryCorrect,
+      totalMs: totalMs,
+      misses: misses,
+      coinsEarned: totalCoins,
+      perfect: perfect,
+      perfectSeries: perfectSeries,
+      masteredAfter: masteredAfter,
+      unlocksEarned: unlocksEarned,
+      stationsReached: stationsReached,
+    };
+  }
+
   // --------------------------------------------------------------------
   // SessionCore — pure state transitions on state.active (DESIGN §6, §7)
   // --------------------------------------------------------------------
@@ -900,91 +1001,12 @@
         if (!a.ok && misses.indexOf(a.key) === -1) misses.push(a.key);
       });
       var totalMs = firstAttempts.reduce(function (sum, a) { return sum + a.ms; }, 0);
-      var baseCoins = active.attempts.reduce(function (sum, a) { return sum + a.coins; }, 0);
 
-      var earnAmount = baseCoins;
-      Economy.ledgerAppend(state, {
-        id: "l_" + sid + "_earn",
-        t: now,
-        type: "earn",
-        amount: earnAmount,
-        ref: sid,
-        note: "session",
-      });
-      var totalCoins = earnAmount;
-
-      // Streak bonus: every 5th consecutive first-attempt correct (retries excluded).
-      var streakRun = 0;
-      var streakCount = 0;
-      firstAttempts.forEach(function (a) {
-        if (a.ok) {
-          streakRun++;
-          if (streakRun % CONFIG.STREAK_LENGTH === 0) {
-            streakCount++;
-            var amount = CONFIG.STREAK_BONUS;
-            Economy.ledgerAppend(state, {
-              // Cumulative bonus count, not the run position — two separate
-              // 5-runs in one session would otherwise collide on the same id
-              // and the duplicate-id guard would silently eat the second bonus.
-              id: "l_" + sid + "_streak_" + streakCount,
-              t: now,
-              type: "earn",
-              amount: amount,
-              ref: sid,
-              note: "streak",
-            });
-            totalCoins += amount;
-          }
-        } else {
-          streakRun = 0;
-        }
-      });
-
-      var perfect = firstTryCorrect === active.planned.length;
-      var perfectSeries = 0;
-      if (perfect) {
-        // Computed BEFORE the session record is pushed to `state.sessions` below.
-        perfectSeries = Economy.perfectSeriesLength(state.sessions) + 1;
-        Economy.ledgerAppend(state, {
-          id: "l_" + sid + "_perfect",
-          t: now,
-          type: "earn",
-          amount: CONFIG.PERFECT_BONUS,
-          ref: sid,
-          note: "perfect",
-        });
-        totalCoins += CONFIG.PERFECT_BONUS;
-        var seriesExtra = Economy.perfectSeriesExtra(perfectSeries);
-        if (seriesExtra > 0) {
-          Economy.ledgerAppend(state, {
-            id: "l_" + sid + "_series",
-            t: now,
-            type: "earn",
-            amount: seriesExtra,
-            ref: sid,
-            note: "perfect-series",
-          });
-          totalCoins += seriesExtra;
-        }
-      } else {
-        var nearAmount = Economy.nearPerfectBonusAmount(firstTryCorrect);
-        if (nearAmount > 0) {
-          Economy.ledgerAppend(state, {
-            id: "l_" + sid + "_near",
-            t: now,
-            type: "earn",
-            amount: nearAmount,
-            ref: sid,
-            note: "near-perfect",
-          });
-          totalCoins += nearAmount;
-        }
-      }
+      var bonuses = applyBonuses(state, active, sid, firstAttempts, now);
+      var totalCoins = bonuses.totalCoins, perfect = bonuses.perfect, perfectSeries = bonuses.perfectSeries;
 
       var unlocksEarned = Economy.newUnlocks(state);
       state.economy.unlocked = (state.economy.unlocked || []).concat(unlocksEarned);
-
-      var isFalling = active.mode === "falling";
 
       // Journey map: stations reached in this session are permanent (never fall).
       // Falling now counts for the map too (Marat 2026-08-28), like typed sessions.
@@ -996,37 +1018,9 @@
         return Facts.mastery(Facts.getFact(state, k)) === "mastered";
       }).length;
 
-      // Falling mode never touches carryover (I-F1) — state.carryover stays
-      // exactly as it was when the session started.
-      var nextCarryover = state.carryover || [];
-      if (!isFalling) {
-        var leftoverCarryover = nextCarryover.slice(CONFIG.SESSION_SIZE);
-        nextCarryover = [];
-        misses.concat(leftoverCarryover).forEach(function (k) {
-          if (nextCarryover.indexOf(k) === -1) nextCarryover.push(k);
-        });
-      }
+      var nextCarryover = computeNextCarryover(state, active, misses);
 
-      var session = {
-        id: sid,
-        startedAt: active.startedAt,
-        endedAt: now,
-        abandoned: false,
-        mode: active.mode || "typed",
-        challengeOn: active.settingsSnapshot.challengeOn,
-        timeLimitSec: active.settingsSnapshot.timeLimitSec,
-        planned: active.planned.slice(),
-        attempts: active.attempts.slice(),
-        firstTryCorrect: firstTryCorrect,
-        totalMs: totalMs,
-        misses: misses,
-        coinsEarned: totalCoins,
-        perfect: perfect,
-        perfectSeries: perfectSeries,
-        masteredAfter: masteredAfter,
-        unlocksEarned: unlocksEarned,
-        stationsReached: stationsReached,
-      };
+      var session = makeSessionRecord(active, sid, now, firstTryCorrect, totalMs, misses, totalCoins, perfect, perfectSeries, masteredAfter, unlocksEarned, stationsReached);
 
       state.sessions.push(session);
       if (state.sessions.length > CONFIG.ATTEMPTS_RETENTION_SESSIONS) {
@@ -1333,10 +1327,49 @@
     return null;
   }
 
+  // S3-2: reward/request ids land verbatim in HTML attributes (data-reward,
+  // data-deactivate-reward, data-approve-request, data-reject-request) —
+  // constraining the charset on import closes the injection path even though
+  // the values are also escapeHtml'd at render time (defense in depth).
+  var SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
   // --------------------------------------------------------------------
   // Migrate — pure raw -> state normalization + import validation (DESIGN §8)
   // --------------------------------------------------------------------
   var Migrate = {
+    // S3-3: shared by emptyState() and migrate() — `normalizeSettings({})`
+    // reproduces exactly the hardcoded defaults emptyState used to inline
+    // (every "or-default" here degrades to that literal when `rs` is empty).
+    normalizeSettings: function (rs) {
+      rs = rs || {};
+      return {
+        childName: rs.childName || "",
+        challengeOn: !!rs.challengeOn,
+        timeLimitSec: rs.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
+        sound: typeof rs.sound === "boolean" ? rs.sound : true,
+        pinHash: rs.pinHash || null,
+        recoveryHash: rs.recoveryHash || null,
+        // null = auto-detect by pointer type; true/false = explicit override
+        // from the question screen's "הצג מקלדת" toggle (DESIGN §9.2).
+        forceNumpad: typeof rs.forceNumpad === "boolean" ? rs.forceNumpad : null,
+        // Cloud backup (private GitHub Gist). Device-local: stripped from export, kept on import.
+        cloud: {
+          token: rs.cloud && typeof rs.cloud.token === "string" ? rs.cloud.token : null,
+          gistId: rs.cloud && typeof rs.cloud.gistId === "string" ? rs.cloud.gistId : null,
+          lastOkAt: rs.cloud && typeof rs.cloud.lastOkAt === "number" ? rs.cloud.lastOkAt : null,
+          lastError: rs.cloud && typeof rs.cloud.lastError === "string" ? rs.cloud.lastError : null,
+          // a bigger backup found at connect time that was NOT adopted; restore prefers it
+          restoreFromGistId: rs.cloud && typeof rs.cloud.restoreFromGistId === "string" ? rs.cloud.restoreFromGistId : null,
+        },
+        // Falling numbers mode (F2). Additive since 2026-08-27; old backups default to off.
+        falling: {
+          enabled: !!(rs.falling && rs.falling.enabled),
+          durationSec: rs.falling && typeof rs.falling.durationSec === "number" ? rs.falling.durationSec : CONFIG.FALLING.DEFAULT_DURATION_SEC,
+          options: rs.falling && typeof rs.falling.options === "number" ? rs.falling.options : CONFIG.FALLING.DEFAULT_OPTIONS,
+        },
+      };
+    },
+
     emptyState: function () {
       return {
         schemaVersion: CONFIG.SCHEMA_VERSION,
@@ -1344,19 +1377,7 @@
         savedAt: 0,
         createdAt: 0,
         lastExportAt: null,
-        settings: {
-          childName: "",
-          challengeOn: false,
-          timeLimitSec: CONFIG.DEFAULT_TIME_LIMIT_SEC,
-          sound: true,
-          pinHash: null,
-          recoveryHash: null,
-          forceNumpad: null,
-          // Cloud backup (private GitHub Gist). Device-local: stripped from export, kept on import.
-          cloud: { token: null, gistId: null, lastOkAt: null, lastError: null, restoreFromGistId: null },
-          // Falling numbers mode (docs/FALLING-DESIGN.md F2). Off by default.
-          falling: { enabled: false, durationSec: CONFIG.FALLING.DEFAULT_DURATION_SEC, options: CONFIG.FALLING.DEFAULT_OPTIONS },
-        },
+        settings: Migrate.normalizeSettings({}),
         economy: { ledger: [], unlocked: [], rewards: [], requests: [] },
         facts: {},
         sessions: [],
@@ -1387,31 +1408,7 @@
         savedAt: raw.savedAt || 0,
         createdAt: raw.createdAt || 0,
         lastExportAt: raw.lastExportAt || null,
-        settings: {
-          childName: rs.childName || "",
-          challengeOn: !!rs.challengeOn,
-          timeLimitSec: rs.timeLimitSec || CONFIG.DEFAULT_TIME_LIMIT_SEC,
-          sound: typeof rs.sound === "boolean" ? rs.sound : true,
-          pinHash: rs.pinHash || null,
-          recoveryHash: rs.recoveryHash || null,
-          // null = auto-detect by pointer type; true/false = explicit override
-          // from the question screen's "הצג מקלדת" toggle (DESIGN §9.2).
-          forceNumpad: typeof rs.forceNumpad === "boolean" ? rs.forceNumpad : null,
-          cloud: {
-            token: rs.cloud && typeof rs.cloud.token === "string" ? rs.cloud.token : null,
-            gistId: rs.cloud && typeof rs.cloud.gistId === "string" ? rs.cloud.gistId : null,
-            lastOkAt: rs.cloud && typeof rs.cloud.lastOkAt === "number" ? rs.cloud.lastOkAt : null,
-            lastError: rs.cloud && typeof rs.cloud.lastError === "string" ? rs.cloud.lastError : null,
-            // a bigger backup found at connect time that was NOT adopted; restore prefers it
-            restoreFromGistId: rs.cloud && typeof rs.cloud.restoreFromGistId === "string" ? rs.cloud.restoreFromGistId : null,
-          },
-          // Falling numbers mode (F2). Additive since 2026-08-27; old backups default to off.
-          falling: {
-            enabled: !!(rs.falling && rs.falling.enabled),
-            durationSec: rs.falling && typeof rs.falling.durationSec === "number" ? rs.falling.durationSec : CONFIG.FALLING.DEFAULT_DURATION_SEC,
-            options: rs.falling && typeof rs.falling.options === "number" ? rs.falling.options : CONFIG.FALLING.DEFAULT_OPTIONS,
-          },
-        },
+        settings: Migrate.normalizeSettings(rs),
         economy: {
           ledger: Array.isArray(re.ledger) ? JSON.parse(JSON.stringify(re.ledger)) : [],
           // Canonicalised (schema 2, V2-DESIGN B2a-4/§3.4): unique, ∈ CONFIG.STICKERS,
@@ -1495,7 +1492,7 @@
         if (!Array.isArray(raw.economy.rewards)) problems.push("economy.rewards must be an array");
         else raw.economy.rewards.forEach(function (r, i) {
           if (!r || typeof r !== "object") { problems.push("rewards[" + i + "] is not an object"); return; }
-          if (typeof r.id !== "string" || !r.id) problems.push("rewards[" + i + "].id must be a non-empty string");
+          if (typeof r.id !== "string" || !SAFE_ID_PATTERN.test(r.id)) problems.push("rewards[" + i + "].id must match " + SAFE_ID_PATTERN);
           if (typeof r.name !== "string") problems.push("rewards[" + i + "].name must be a string");
           if (typeof r.cost !== "number" || !isFinite(r.cost) || r.cost < 0 || r.cost > CONFIG.LEDGER_MAX_ABS_AMOUNT) problems.push("rewards[" + i + "].cost out of range");
         });
@@ -1504,7 +1501,7 @@
         if (!Array.isArray(raw.economy.requests)) problems.push("economy.requests must be an array");
         else raw.economy.requests.forEach(function (q, i) {
           if (!q || typeof q !== "object") { problems.push("requests[" + i + "] is not an object"); return; }
-          if (typeof q.id !== "string" || !q.id) problems.push("requests[" + i + "].id must be a non-empty string");
+          if (typeof q.id !== "string" || !SAFE_ID_PATTERN.test(q.id)) problems.push("requests[" + i + "].id must match " + SAFE_ID_PATTERN);
           if (typeof q.nameSnapshot !== "string") problems.push("requests[" + i + "].nameSnapshot must be a string");
           if (typeof q.costSnapshot !== "number" || !isFinite(q.costSnapshot) || q.costSnapshot < 0 || q.costSnapshot > CONFIG.LEDGER_MAX_ABS_AMOUNT) problems.push("requests[" + i + "].costSnapshot out of range");
           if (["requested", "approved", "rejected", "cancelled"].indexOf(q.status) === -1) problems.push("requests[" + i + "].status invalid");
@@ -1987,13 +1984,16 @@
   // flight). `mutator(clone)` mutates a clone of the current state in place;
   // the clone only replaces `this.state` on a successful commit — a failed
   // save (stale or exception) always leaves `this.state` (incl. `active`)
-  // untouched.
+  // untouched. On success the resolved value is `{ ok:true, state, value }`
+  // where `value` is whatever `mutator` returned — callers that need a
+  // result out of the mutation (rather than reaching back into `state`)
+  // should `return` it from their mutator and read `result.value`.
   StorageInstance.prototype.save = function (mutator, now) {
     var self = this;
     return self._enqueue(function () {
       if (!self.state) return Promise.resolve({ ok: false, error: "no state loaded" });
       var clone = JSON.parse(JSON.stringify(self.state));
-      mutator(clone);
+      var mutatorValue = mutator(clone);
       clone.rev = self.rev + 1;
       clone.savedAt = now;
       var expectedRev = self.rev;
@@ -2006,7 +2006,7 @@
           self.rev = clone.rev;
           self.state = clone;
           self._mirror();
-          return { ok: true, state: self.state };
+          return { ok: true, state: self.state, value: mutatorValue };
         })
         .catch(function (err) {
           return { ok: false, error: String((err && err.message) || err) };

@@ -45,6 +45,14 @@ test("a perfect session: 10/10, perfect=true, one earn entry + one perfect entry
   assert.equal(state.active, null);
 });
 
+test("[S3-F M5] two separate 5-answer streaks within one 10-question perfect session mint cumulative _streak_1/_streak_2 ids", () => {
+  const state = freshState();
+  const session = playPerfectSession(state, seededRng(1), 1000);
+  const streakEntries = state.economy.ledger.filter((e) => e.id.startsWith("l_" + session.id + "_streak_"));
+  assert.deepEqual(streakEntries.map((e) => e.id), ["l_" + session.id + "_streak_1", "l_" + session.id + "_streak_2"]);
+  streakEntries.forEach((e) => assert.equal(e.amount, CONFIG.STREAK_BONUS));
+});
+
 test("a wrong answer is pushed to retryQueue and appears at the end of the session", () => {
   const state = freshState();
   SessionCore.start(state, seededRng(2), 1000);
@@ -326,6 +334,19 @@ test("two perfect sessions on the same day BOTH get the perfect bonus (the daily
   assert.equal(seriesEntries[0].amount, CONFIG.PERFECT_SERIES_EXTRA[1]);
 });
 
+test("[S3-F M2b] within a session, the _perfect ledger entry is appended BEFORE the _series entry", () => {
+  const state = freshState();
+  const morning = new Date(2026, 7, 25, 9, 0, 0).getTime();
+  const laterSameDay = new Date(2026, 7, 25, 20, 0, 0).getTime();
+  playPerfectSession(state, seededRng(14), morning); // s1: series=1, no _series entry yet
+  const s2 = playPerfectSession(state, seededRng(15), laterSameDay); // s2: series=2, gets both
+  const perfectIdx = state.economy.ledger.findIndex((e) => e.id === "l_" + s2.id + "_perfect");
+  const seriesIdx = state.economy.ledger.findIndex((e) => e.id === "l_" + s2.id + "_series");
+  assert.notEqual(perfectIdx, -1);
+  assert.notEqual(seriesIdx, -1);
+  assert.ok(perfectIdx < seriesIdx, "_perfect must land in the ledger before _series within the same session");
+});
+
 test("perfect series: 3 perfect in a row, then a 9/10, then a perfect one — series and ledger track correctly", () => {
   const state = freshState();
   let t = 1000;
@@ -426,4 +447,20 @@ test("[review] submit result carries withinLimit and retry flags", () => {
   const retryResult = SessionCore.submit(state, Facts.answer(state.active.current.asked), 7500, {});
   assert.equal(retryResult.ok, true);
   assert.equal(retryResult.retry, true);
+});
+
+test("[S3-F M8] finish() unlocks a sticker whose threshold is crossed by THIS session's own coins, not only pre-existing lifetime coins", () => {
+  // unlockThreshold(1) = 25; a solo perfect session with this rng earns 19
+  // (verified: 10 base + 4 streak + 5 perfect) — below threshold on its own.
+  // Seed 20 pre-existing lifetime coins (below threshold) so the crossing
+  // happens only once THIS session's ledger entries (earn/streak/perfect,
+  // appended by applyBonuses) are counted — pins Economy.newUnlocks() being
+  // called AFTER those appends, not before.
+  const state = freshState();
+  state.economy.ledger.push({ id: "l_seed_earn", t: 500, type: "earn", amount: 20, ref: "seed", note: "seed" });
+  const session = playPerfectSession(state, seededRng(1), 1000);
+  assert.ok(session.coinsEarned > 0);
+  assert.ok(20 + session.coinsEarned >= CONFIG.UNLOCK_BASE, "this fixture must actually cross unlockThreshold(1) this session");
+  assert.deepEqual(session.unlocksEarned, [CONFIG.STICKERS[0]]);
+  assert.ok(state.economy.unlocked.includes(CONFIG.STICKERS[0]));
 });

@@ -104,7 +104,9 @@
     return App.storage.importJson(json, Date.now()).then(function (imp) {
       if (!imp.ok) return { ok: false, error: (imp.problems || [imp.error || "?"]).join(", ") };
       return maybeRebuildEvidence().then(function () {
-        return save(function (s) { s.settings.cloud = { token: token, gistId: gistId, lastOkAt: Date.now(), lastError: null, restoreFromGistId: null }; }).then(function () { return { ok: true }; });
+        return save(function (s) { s.settings.cloud = { token: token, gistId: gistId, lastOkAt: Date.now(), lastError: null, restoreFromGistId: null }; }).then(function (result) {
+          return result.ok ? { ok: true } : { ok: false, error: T.saveFailure };
+        });
       });
     });
   }
@@ -119,7 +121,9 @@
         return App.storage.importJson(latest.json, Date.now()).then(function (imp) {
           if (!imp.ok) return { ok: false, error: (imp.problems || [imp.error || "?"]).join(", ") };
           return maybeRebuildEvidence().then(function () {
-            return save(function (s) { s.settings.cloud = { token: token, gistId: f.gistId, lastOkAt: Date.now(), lastError: null }; }).then(function () { return { ok: true, updatedAt: latest.updatedAt }; });
+            return save(function (s) { s.settings.cloud = { token: token, gistId: f.gistId, lastOkAt: Date.now(), lastError: null }; }).then(function (result) {
+              return result.ok ? { ok: true, updatedAt: latest.updatedAt } : { ok: false, error: T.saveFailure };
+            });
           });
         });
       });
@@ -161,7 +165,7 @@
     setTimeout(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 4500);
   }
 
-  var APP_VERSION = "0.13.0"; // set by tools/bump-version.js — do not hand-edit
+  var APP_VERSION = "0.14.0"; // set by tools/bump-version.js — do not hand-edit
 
   // ------------------------------------------------------------------
   // Boot / storage glue
@@ -396,8 +400,9 @@
           s.settings.recoveryHash = recoveryHash;
         });
       });
-    }).then(function () {
-      showRecoveryCode(recoveryCode);
+    }).then(function (result) {
+      if (result.ok) showRecoveryCode(recoveryCode);
+      else errorEl.textContent = T.saveFailure;
     });
   }
 
@@ -538,10 +543,9 @@
     // a live clock (2026-08-28). The old "mark interrupted" branch is gone.
 
     nextFrame(function () {
-      var paintedResult = null;
-      save(function (s) { paintedResult = MathCore.SessionCore.paint(s, Date.now()); }).then(function (result) {
+      save(function (s) { return MathCore.SessionCore.paint(s, Date.now()); }).then(function (result) {
         if (!result.ok) return; // stale/error already surfaced via banner/stale card
-        if (!paintedResult) { finishSession(); } else { renderCurrentQuestion(); }
+        if (!result.value) { finishSession(); } else { renderCurrentQuestion(); }
       });
     });
   }
@@ -556,18 +560,17 @@
     else renderQuestion();
   }
 
-  function renderQuestion() {
-    var state = S();
+  // S3-3: shared by renderQuestion and renderFallingQuestion — both need the
+  // same current-question dots/done-count/coin value, computed identically.
+  // Dots reflect actual per-fact resolution state, not just "how many
+  // attempts have happened so far" — a wrong first attempt must show as
+  // pending-retry (DESIGN §6 "retries show 🔁"), not as done (caught via
+  // live browser testing: a missed question's dot was rendering green).
+  function questionViewModel(state) {
     var active = state.active;
     var current = active.current;
-    if (!current) return;
-    questionInput = "";
+    if (!current) return null;
     var parts = MathCore.Facts.parts(current.asked);
-    var coarse = state.settings.forceNumpad !== false && (isCoarsePointer() || state.settings.forceNumpad === true);
-    // Dots reflect actual per-fact resolution state, not just "how many
-    // attempts have happened so far" — a wrong first attempt must show as
-    // pending-retry (DESIGN §6 "retries show 🔁"), not as done (caught via
-    // live browser testing: a missed question's dot was rendering green).
     var retrySet = {};
     active.retryQueue.forEach(function (asked) { retrySet[asked] = true; });
     var resolvedSet = {};
@@ -580,6 +583,16 @@
     }).join("");
     var doneOrRetryCount = active.planned.filter(function (asked) { return resolvedSet[asked] || retrySet[asked]; }).length;
     var value = MathCore.Facts.value(state, current.key);
+    return { active: active, current: current, parts: parts, dotsHtml: dotsHtml, doneOrRetryCount: doneOrRetryCount, value: value };
+  }
+
+  function renderQuestion() {
+    var state = S();
+    var vm = questionViewModel(state);
+    if (!vm) return;
+    var active = vm.active, current = vm.current, parts = vm.parts, dotsHtml = vm.dotsHtml, doneOrRetryCount = vm.doneOrRetryCount, value = vm.value;
+    questionInput = "";
+    var coarse = state.settings.forceNumpad !== false && (isCoarsePointer() || state.settings.forceNumpad === true);
     var challengeOn = active.settingsSnapshot.challengeOn && !current.interrupted;
 
     // Two groups (.question-info / .question-input) so a landscape/short-height
@@ -613,7 +626,7 @@
     bindAction("exit", onExitClick);
     bindAction("exit-bottom", onExitClick);
     bindAction("toggle-keyboard", function () {
-      save(function (s) { s.settings.forceNumpad = !coarse; }).then(renderQuestion);
+      save(function (s) { s.settings.forceNumpad = !coarse; }).then(function (result) { if (result.ok) renderQuestion(); });
     });
 
     if (coarse) {
@@ -644,10 +657,10 @@
     }
   }
 
-  // A tiny seeded PRNG (mulberry32) so the candidate set for a given question
-  // is stable across re-renders of the SAME `current` (e.g. the interrupted-
-  // resume short-circuit in paintNextQuestion calling renderCurrentQuestion
-  // again) without needing core.js to persist candidates on state.active.
+  // A tiny seeded PRNG (mulberry32): the candidate set is a pure function of
+  // (active.id, current.asked, current.shownAt), so ANY re-render of the SAME
+  // `current` reproduces the same candidates without core.js needing to
+  // persist them on state.active.
   function seededRngFromString(str) {
     var seed = 0;
     for (var i = 0; i < str.length; i++) seed = (Math.imul(seed, 31) + str.charCodeAt(i)) | 0;
@@ -662,24 +675,10 @@
 
   function renderFallingQuestion() {
     var state = S();
-    var active = state.active;
-    var current = active.current;
-    if (!current) return;
+    var vm = questionViewModel(state);
+    if (!vm) return;
+    var active = vm.active, current = vm.current, parts = vm.parts, dotsHtml = vm.dotsHtml, doneOrRetryCount = vm.doneOrRetryCount, value = vm.value;
     clearFallingKeyHandler();
-
-    var parts = MathCore.Facts.parts(current.asked);
-    var retrySet = {};
-    active.retryQueue.forEach(function (asked) { retrySet[asked] = true; });
-    var resolvedSet = {};
-    active.attempts.forEach(function (a) { if (a.ok) resolvedSet[a.asked] = true; });
-    var dotsHtml = active.planned.map(function (asked) {
-      var cls = "dot";
-      if (retrySet[asked]) cls = "dot retry";
-      else if (resolvedSet[asked]) cls = "dot done";
-      return '<span class="' + cls + '"></span>';
-    }).join("");
-    var doneOrRetryCount = active.planned.filter(function (asked) { return resolvedSet[asked] || retrySet[asked]; }).length;
-    var value = MathCore.Facts.value(state, current.key);
 
     var fallingSnapshot = active.settingsSnapshot.falling || {};
     var options = fallingSnapshot.options || CONFIG.FALLING.DEFAULT_OPTIONS;
@@ -861,19 +860,10 @@
     }
     if (n === null) return "";
     var p = a * b;
-    var eq = function (parts) { return '<span class="ltr">' + parts + "</span>"; };
-    switch (n) {
-      case 10: return eq(m + " × 10 = " + m + "0") + " — מוסיפים 0";
-      case 9: return eq("10 × " + m + " − " + m + " = " + (10 * m) + " − " + m + " = " + p);
-      case 5: return eq("10 × " + m + " = " + (10 * m)) + ", חצי מזה: " + eq(String(p));
-      case 2: return eq(m + " + " + m + " = " + p);
-      case 4: return eq("2 × " + m + " = " + (2 * m)) + ", כפול 2: " + eq(String(p));
-      case 8: return eq("4 × " + m + " = " + (4 * m)) + ", כפול 2: " + eq(String(p));
-      case 3: return eq("2 × " + m + " + " + m + " = " + (2 * m) + " + " + m + " = " + p);
-      case 6: return eq("5 × " + m + " + " + m + " = " + (5 * m) + " + " + m + " = " + p);
-      case 7: return eq("5 × " + m + " + 2 × " + m + " = " + (5 * m) + " + " + (2 * m) + " = " + p);
-      default: return eq(m + " × 1 = " + m) + " — כפול 1 נשאר אותו מספר";
-    }
+    // S3-2: the Hebrew phrasing per trick lives in T.question.strategies now
+    // (strings.js) — this just picks n/m/p and hands them to the template.
+    var tpl = T.question.strategies[n] || T.question.strategies.default;
+    return tpl(m, p);
   }
 
   function dotArrayHtml(asked) {
@@ -919,11 +909,10 @@
     App.feedbackLock = true;
     clearInterval(challengeTimerHandle);
     document.querySelectorAll(".bubble").forEach(function (b) { if (!b.classList.contains("picked")) b.style.animationPlayState = "paused"; });
-    var submitResult = null;
-    save(function (s) { submitResult = MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); })
+    save(function (s) { return MathCore.SessionCore.submit(s, Number(value), Date.now(), {}); })
       .then(function (result) {
         if (!result.ok) { App.feedbackLock = false; return; } // stale/error already surfaced via banner/stale card
-        showFeedback(submitResult);
+        showFeedback(result.value);
       })
       .catch(function () { App.feedbackLock = false; }); // a rejected save must never strand the lock
   }
@@ -1040,11 +1029,10 @@
     var state = S();
     if (!state.active) { navigate("home"); return; }
     if (state.active.queue.length > 0 || state.active.retryQueue.length > 0) return;
-    var sessionResult = null;
-    save(function (s) { sessionResult = MathCore.SessionCore.finish(s, Date.now()); }).then(function (result) {
+    save(function (s) { return MathCore.SessionCore.finish(s, Date.now()); }).then(function (result) {
       // Summary is rendered only after finish()'s save resolved (DESIGN §6).
-      if (result.ok && sessionResult) {
-        App.lastSessionResult = sessionResult;
+      if (result.ok && result.value) {
+        App.lastSessionResult = result.value;
         cloudBackupSoon();
         navigate("summary");
       }
@@ -1067,11 +1055,10 @@
     document.body.appendChild(overlay);
     overlay.querySelector('[data-action="exit-yes"]').addEventListener("click", function () {
       document.body.removeChild(overlay); // exit only suspends (D12) — state.active already journaled
-      // The in-flight question is deferred on the RETURN visit (SessionCore.paint)
-      // (paintNextQuestion's short-circuit branch), not here — that covers
-      // every way of leaving mid-question (this button, a back-gesture, a
-      // hand-edited hash) in one place instead of only this one exit path
-      // (WP9 review finding B, fix-verification round).
+      // The in-flight question is deferred on the RETURN visit — SessionCore.paint()
+      // itself defers a leftover `current`, not this handler — so every way of
+      // leaving mid-question (this button, a back-gesture, a hand-edited hash)
+      // is covered in one place instead of only this one exit path.
       navigate("home");
     });
     overlay.querySelector('[data-action="exit-no"]').addEventListener("click", function () {
@@ -1273,7 +1260,7 @@
             "<span>" + escapeHtml(r.name) + " — " + r.cost + " 🪙</span>" +
             (pending
               ? "<span>" + T.rewards.pendingLabel + "</span>"
-              : '<button data-reward="' + r.id + '" ' + (canAfford ? "" : "disabled") + ">" + T.rewards.requestBtn + "</button>") +
+              : '<button data-reward="' + escapeHtml(r.id) + '" ' + (canAfford ? "" : "disabled") + ">" + T.rewards.requestBtn + "</button>") +
             "</div>"
           );
         }).join("")
@@ -1389,7 +1376,8 @@
       if (p1 !== p2) { errorEl.textContent = T.parentSetup.errorPinMismatch; return; }
       MathCore.Pin.hash(window.crypto, p1).then(function (pinHash) {
         return save(function (s) { s.settings.pinHash = pinHash; });
-      }).then(function () {
+      }).then(function (result) {
+        if (!result.ok) { errorEl.textContent = T.saveFailure; return; }
         App.parentUnlocked = true;
         renderParentDashboard();
       });
@@ -1433,7 +1421,13 @@
       "<label>" + T.parent.fallingDurationLabel + ': <span id="set-falling-duration-value">' + falling.durationSec + "</span><br>" +
       '<input id="set-falling-duration" type="range" min="' + CONFIG.FALLING.MIN_DURATION_SEC + '" max="' + CONFIG.FALLING.MAX_DURATION_SEC + '" value="' + falling.durationSec + '" /></label><br><br>' +
       "<label>" + T.parent.fallingOptionsLabel + '<br><select id="set-falling-options">' +
-      [4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (falling.options === n ? " selected" : "") + ">" + n + "</option>"; }).join("") +
+      (function () {
+        var opts = "";
+        for (var n = CONFIG.FALLING.MIN_OPTIONS; n <= CONFIG.FALLING.MAX_OPTIONS; n++) {
+          opts += '<option value="' + n + '"' + (falling.options === n ? " selected" : "") + ">" + n + "</option>";
+        }
+        return opts;
+      })() +
       "</select></label><br><br>" +
       '<button data-action="save-settings">' + T.parent.saveSettingsBtn + "</button> " +
       '<button class="secondary" data-action="change-pin">' + T.parent.changePinBtn + "</button>" +
@@ -1502,7 +1496,7 @@
         .map(function (r) {
           return (
             '<div class="reward-item"><span>' + escapeHtml(r.name) + " — " + r.cost + " 🪙" + (r.active ? "" : T.parent.removedSuffix) + "</span>" +
-            (r.active ? '<button class="secondary" data-deactivate-reward="' + r.id + '">' + T.parent.deactivateBtn + "</button>" : "") +
+            (r.active ? '<button class="secondary" data-deactivate-reward="' + escapeHtml(r.id) + '">' + T.parent.deactivateBtn + "</button>" : "") +
             "</div>"
           );
         })
@@ -1514,8 +1508,8 @@
           .map(function (req) {
             return (
               '<div class="reward-item"><span>' + escapeHtml(req.nameSnapshot) + " — " + Number(req.costSnapshot) + " 🪙</span>" +
-              '<span><button data-approve-request="' + req.id + '">' + T.parent.approveBtn + "</button> " +
-              '<button class="secondary" data-reject-request="' + req.id + '">' + T.parent.rejectBtn + "</button></span></div>"
+              '<span><button data-approve-request="' + escapeHtml(req.id) + '">' + T.parent.approveBtn + "</button> " +
+              '<button class="secondary" data-reject-request="' + escapeHtml(req.id) + '">' + T.parent.rejectBtn + "</button></span></div>"
             );
           })
           .join("")
@@ -1560,11 +1554,10 @@
       btn.addEventListener("click", function () {
         var id = btn.dataset.approveRequest;
         var ledgerId = "l_" + id + "_redeem";
-        var approveResult = null;
-        save(function (s) { approveResult = MathCore.Economy.approveRequest(s, id, ledgerId, Date.now()); }).then(function (result) {
+        save(function (s) { return MathCore.Economy.approveRequest(s, id, ledgerId, Date.now()); }).then(function (result) {
           if (!result.ok) return; // stale/error already surfaced
           cloudBackupSoon();
-          if (approveResult && !approveResult.ok) {
+          if (result.value && !result.value.ok) {
             document.getElementById("pending-requests-msg").textContent = T.parent.insufficientBalanceMsg;
           } else {
             renderParentDashboard();
@@ -1819,7 +1812,7 @@
       '<div style="display:flex;flex-wrap:wrap;gap:0.75rem;justify-content:center">' +
       kpiTile(T.parent.kpiSessions, totals.totalSessions) +
       kpiTile(T.parent.kpiCoins, totals.lifetimeCoins) +
-      kpiTile(T.parent.kpiMastered, totals.masteredCount + "/55") +
+      kpiTile(T.parent.kpiMastered, totals.masteredCount + "/" + MathCore.Facts.allKeys().length) +
       kpiTile(T.parent.kpiStreak, totals.dailyStreak) +
       kpiTile(T.parent.kpiMap, MathCore.Map.overview(state).filter(function (r) { return r.reached; }).length + "/" + CONFIG.MAP_PATH.length) +
       kpiTile(T.parent.kpiAccuracy, overallAccuracy + "%") +
@@ -1872,7 +1865,8 @@
         return cloudPeek(token, null).then(function (peek) {
           var local = (S().sessions || []).length;
           var adopt = peek.ok && peek.sessions <= local;
-          return save(function (s) { s.settings.cloud = { token: token, gistId: adopt ? peek.gistId : null, lastOkAt: null, lastError: null, restoreFromGistId: peek.ok && !adopt ? peek.gistId : null }; }).then(function () {
+          return save(function (s) { s.settings.cloud = { token: token, gistId: adopt ? peek.gistId : null, lastOkAt: null, lastError: null, restoreFromGistId: peek.ok && !adopt ? peek.gistId : null }; }).then(function (result) {
+            if (!result.ok) { msg(T.saveFailure); return; }
             if (peek.ok && !adopt) { renderParentDashboard(); var el = document.getElementById("cloud-msg"); if (el) el.textContent = T.parent.cloudFoundExisting + " " + T.parent.cloudRestorePreview(new Date(peek.updatedAt).toLocaleString("he-IL"), peek.sessions); return; }
             return cloudBackupNow().then(function (r) { renderParentDashboard(); var el2 = document.getElementById("cloud-msg"); if (el2 && r.skipped) el2.textContent = r.error; });
           });
@@ -1903,7 +1897,7 @@
       });
     });
     bindAction("cloud-disconnect", function () {
-      save(function (s) { s.settings.cloud = { token: null, gistId: null, lastOkAt: null, lastError: null }; }).then(renderParentDashboard);
+      save(function (s) { s.settings.cloud = { token: null, gistId: null, lastOkAt: null, lastError: null }; }).then(function (result) { if (result.ok) renderParentDashboard(); });
     });
   }
 
