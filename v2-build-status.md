@@ -405,3 +405,5 @@ deviations: the falling-screen exit-bottom fix and its residual `.lanes` boundin
 assumptions discovered: none new.
 
 ## 2026-08-29T08:45:12Z · designer · 1-R review (fresh Fable 5): SHIP-AFTER-FIXES → executor fixed F1 (strip over bottom buttons on typed/summary), F2 (reduced-motion specificity), F3/F4 (blind tests); fix-verification SHIP with one LOW (320×568: landed label under the absolute exit button on the falling screen). Designer: falling screen padding-bottom 3.6rem (portrait: label 507–541 vs exit 543–589 at 320×568; 583–616 vs 618–664 at 375×667 — no overlap), landscape: exit-bottom back in flow + strip hidden (fv2-harness). Suite 219/219, bump re-run.
+
+## 2026-08-29T08:45:13Z · designer · package 1 committed+pushed as d18815d · package 2 baseline = the commit containing this entry (given verbatim in the kickoff prompt)
